@@ -3,27 +3,17 @@ import Link from "next/link";
 import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
 
+const pairingOptions = [
+  { value: "最終戦だけ順位卓", label: "① 最終戦だけ順位卓", help: "初回は完全ランダム。途中は重複回避ランダム。最終戦のみ累積順位で卓を分けます。" },
+  { value: "重複回避ランダム", label: "② 全回戦・重複回避ランダム", help: "初回は完全ランダム。以降は同卓の重複をなるべく避けてランダムに組みます。" },
+  { value: "2回戦目以降すべて順位卓", label: "③ 2回戦目以降すべて順位卓", help: "初回は完全ランダム。以降は累積順位の近い参加者で卓を分けます。" },
+];
 function formatDate(value: string) { const date = new Date(value); return Number.isNaN(date.getTime()) ? value : `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日 ${date.toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" })}開始`; }
 
 export default function NewTournamentPage() {
   const router = useRouter();
-  const [name, setName] = useState("");
-  const [gameType, setGameType] = useState("雀魂-じゃんたま-");
-  const [startAt, setStartAt] = useState("");
-  const [password, setPassword] = useState("");
-  const [rounds, setRounds] = useState("4");
-  const [uma, setUma] = useState(["20", "10", "0", "0"]);
-  const [notice, setNotice] = useState("");
-  const [error, setError] = useState("");
-
-  const submit = (event: FormEvent) => {
-    event.preventDefault();
-    if (!name.trim() || !startAt || !password.trim()) { setError("大会名・開始予定日時・参加パスワードを入力してください"); return; }
-    const tournament = { id: `local-${Date.now()}`, name: name.trim(), gameType: gameType.trim() || "雀魂-じゃんたま-", date: formatDate(startAt), rounds: Number(rounds), status: "募集中", color: "green", password, uma: uma.map(Number), notice };
-    const existing = JSON.parse(window.localStorage.getItem("janmatch:tournaments") ?? "[]");
-    window.localStorage.setItem("janmatch:tournaments", JSON.stringify([tournament, ...existing]));
-    router.push("/");
-  };
-
-  return <main className="jm-user-shell jm-narrow"><Link className="jm-back" href="/">← 大会一覧</Link><p className="janmatch-kicker">CREATE TOURNAMENT</p><h1>大会を作成</h1><p className="jm-muted">参加者に共有する大会の基本設定を入力します。</p><form className="jm-form-card jm-create-form" onSubmit={submit}><label>大会名<input value={name} onChange={(event) => setName(event.target.value)} placeholder="例：第1回 JanMatch交流戦" maxLength={80} /></label><label>ゲームの種類<input value={gameType} onChange={(event) => setGameType(event.target.value)} placeholder="例：雀魂-じゃんたま-" maxLength={80} /></label><label>開始予定日時<input type="datetime-local" value={startAt} onChange={(event) => setStartAt(event.target.value)} /></label><label>参加パスワード<input type="text" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="参加者に共有するパスワード" /></label><label>全回戦数<input type="number" value={rounds} onChange={(event) => setRounds(event.target.value)} min={1} max={20} /></label><fieldset><legend>ウマ（順位点）</legend><div className="jm-uma-grid">{["1位", "2位", "3位", "4位"].map((label, index) => <label key={label}>{label}<input type="number" value={uma[index]} onChange={(event) => setUma((current) => current.map((value, i) => i === index ? event.target.value : value))} /></label>)}</div><p className="jm-form-note">マイナスの数値も入力できます。</p></fieldset><label>ルール・お知らせ<textarea value={notice} onChange={(event) => setNotice(event.target.value)} placeholder="対局ルール、結果報告方法など" /></label>{error && <p className="jm-error">{error}</p>}<div className="jm-form-actions"><Link className="jm-cancel" href="/">キャンセル</Link><button className="jm-primary" type="submit">大会を作成する</button></div></form></main>;
+  const [name, setName] = useState(""); const [gameType, setGameType] = useState("雀魂-じゃんたま-"); const [startAt, setStartAt] = useState(""); const [password, setPassword] = useState(""); const [rounds, setRounds] = useState("4"); const [pairingMode, setPairingMode] = useState(pairingOptions[0].value); const [uma, setUma] = useState(["20", "10", "0", "0"]); const [notice, setNotice] = useState(""); const [error, setError] = useState("");
+  const selectedPairing = pairingOptions.find((option) => option.value === pairingMode) ?? pairingOptions[0];
+  const submit = (event: FormEvent) => { event.preventDefault(); if (!name.trim() || !startAt || !password.trim()) { setError("大会名・開始予定日時・参加パスワードを入力してください"); return; } const tournament = { id: `local-${Date.now()}`, name: name.trim(), gameType: gameType.trim() || "雀魂-じゃんたま-", date: formatDate(startAt), rounds: Number(rounds), status: "募集中", color: "green", pairingMode, password, uma: uma.map(Number), notice }; const existing = JSON.parse(window.localStorage.getItem("janmatch:tournaments") ?? "[]"); window.localStorage.setItem("janmatch:tournaments", JSON.stringify([tournament, ...existing])); router.push("/"); };
+  return <main className="jm-user-shell jm-narrow"><Link className="jm-back" href="/">← 大会一覧</Link><p className="janmatch-kicker">CREATE TOURNAMENT</p><h1>大会を作成</h1><p className="jm-muted">参加者に共有する大会の基本設定を入力します。</p><form className="jm-form-card jm-create-form" onSubmit={submit}><label>大会名<input value={name} onChange={(event) => setName(event.target.value)} placeholder="例：第1回 JanMatch交流戦" maxLength={80} /></label><label>ゲームの種類<input value={gameType} onChange={(event) => setGameType(event.target.value)} placeholder="例：雀魂-じゃんたま-" maxLength={80} /></label><label>開始予定日時<input type="datetime-local" value={startAt} onChange={(event) => setStartAt(event.target.value)} /></label><label>参加パスワード<input type="text" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="参加者に共有するパスワード" /></label><label>全回戦数<input type="number" value={rounds} onChange={(event) => setRounds(event.target.value)} min={1} max={20} /></label><fieldset><legend>組み合わせ方式</legend><div className="jm-pairing-options">{pairingOptions.map((option) => <label className="jm-pairing-option" key={option.value}><input type="radio" name="pairingMode" value={option.value} checked={pairingMode === option.value} onChange={() => setPairingMode(option.value)} /><span><b>{option.label}</b><small>{option.help}</small></span></label>)}</div><p className="jm-form-note">スキップは参加者が各回戦の参加ボタンを押さないことで調整します。</p></fieldset><fieldset><legend>ウマ（順位点）</legend><div className="jm-uma-grid">{["1位", "2位", "3位", "4位"].map((label, index) => <label key={label}>{label}<input type="number" value={uma[index]} onChange={(event) => setUma((current) => current.map((value, i) => i === index ? event.target.value : value))} /></label>)}</div><p className="jm-form-note">マイナスの数値も入力できます。</p></fieldset><label>ルール・お知らせ<textarea value={notice} onChange={(event) => setNotice(event.target.value)} placeholder="対局ルール、結果報告方法など" /></label>{error && <p className="jm-error">{error}</p>}<div className="jm-form-actions"><Link className="jm-cancel" href="/">キャンセル</Link><button className="jm-primary" type="submit">大会を作成する</button></div></form></main>;
 }
