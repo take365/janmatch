@@ -12,6 +12,7 @@
     "test": "npm run build && node --test tests/rendered-html.test.mjs",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "db:generate": "drizzle-kit generate",
+    "db:local:migrate": "wrangler d1 migrations apply janmatch-local --local",
     "discord:register": "node scripts/register-discord-command.mjs"
   },
   "dependencies": {
