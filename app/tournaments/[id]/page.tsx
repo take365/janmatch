@@ -65,6 +65,7 @@ export default function TournamentPage() {
   };
 
   useEffect(() => { load().catch((reason: unknown) => setError(reason instanceof Error ? reason.message : "大会データを取得できませんでした。")); }, [id]);
+  useEffect(() => { if (!manage) return; const timer = window.setInterval(() => { void load(); }, 5000); return () => window.clearInterval(timer); }, [manage, id]);
 
   const mutateRound = async (roundIndex: number, action: string, extra: Record<string, unknown> = {}) => {
     const round = rounds[roundIndex]; if (!round) return false;

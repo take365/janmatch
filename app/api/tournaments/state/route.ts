@@ -3,7 +3,7 @@ import { getProfile, hasTournamentAccess } from "../../../lib/session";
 
 type Table = { label: string; members: string[]; representative: string; roomId?: string; scores?: number[]; approvals?: string[]; resultStatus?: string };
 type RoundState = { tables: Table[]; deadline?: number };
-type StateBody = { tournamentId?: unknown; round?: unknown; expectedVersion?: unknown; action?: unknown; tableIndex?: unknown; roomId?: unknown; scores?: unknown };
+type StateBody = { tournamentId?: unknown; round?: unknown; expectedVersion?: unknown; action?: unknown; tableIndex?: unknown; roomId?: unknown; scores?: unknown; deadline?: unknown };
 
 function parseState(value: unknown): RoundState {
   try {
@@ -26,6 +26,17 @@ async function findRound(tournamentId: string, round: number) {
   return env.DB.prepare("SELECT status, state_json as stateJson, version FROM tournament_rounds WHERE tournament_id = ? AND round = ?").bind(tournamentId, round).first<{ status: string; stateJson: string; version: number }>();
 }
 
+async function closeExpiredRound(tournamentId: string, round: number, stateJson: string, version: number) {
+  const state = parseState(stateJson);
+  if (!state.deadline || state.deadline > Date.now()) return { status: "受付中", ...state, version };
+  const entries = await env.DB.prepare("SELECT DISTINCT nickname FROM tournament_entries WHERE tournament_id = ? AND round = ? AND joined = 1 ORDER BY nickname").bind(tournamentId, round).all<{ nickname: string }>();
+  const nextState = { tables: buildTables(entries.results.map((entry: { nickname: string }) => entry.nickname)) };
+  const updated = await env.DB.prepare("UPDATE tournament_rounds SET status = '確定', state_json = ?, version = version + 1, updated_at = CURRENT_TIMESTAMP WHERE tournament_id = ? AND round = ? AND status = '受付中' AND version = ?").bind(JSON.stringify(nextState), tournamentId, round, version).run();
+  if (updated.meta.changes) return { status: "確定", ...nextState, version: version + 1 };
+  const current = await findRound(tournamentId, round);
+  return current ? { status: current.status, ...parseState(current.stateJson), version: current.version } : { status: "受付中", ...state, version };
+}
+
 export async function GET(request: Request) {
   if (!env.DB) return Response.json({ error: "D1 binding is unavailable" }, { status: 503 });
   const tournamentId = new URL(request.url).searchParams.get("tournamentId");
@@ -34,7 +45,12 @@ export async function GET(request: Request) {
   if (!tournament) return Response.json({ error: "大会が見つかりません" }, { status: 404 });
   if (tournament.password && !hasTournamentAccess(request, tournamentId)) return Response.json({ error: "大会のパスワードが必要です" }, { status: 403 });
   const result = await env.DB.prepare("SELECT round, status, state_json as stateJson, version FROM tournament_rounds WHERE tournament_id = ? ORDER BY round").bind(tournamentId).all();
-  return Response.json((result.results as Array<Record<string, unknown>>).map((row) => ({ round: row.round, status: row.status, ...parseState(row.stateJson), version: row.version })));
+  const rounds = [];
+  for (const row of result.results as Array<{ round: number; status: string; stateJson: string; version: number }>) {
+    const state = row.status === "受付中" ? await closeExpiredRound(tournamentId, row.round, row.stateJson, row.version) : { status: row.status, ...parseState(row.stateJson), version: row.version };
+    rounds.push({ round: row.round, ...state });
+  }
+  return Response.json(rounds);
 }
 
 export async function PUT(request: Request) {
@@ -63,11 +79,16 @@ export async function PUT(request: Request) {
       const previous = await findRound(tournamentId, round - 1);
       if (previous?.status !== "確定") return Response.json({ error: "前の回戦が完了してから開始できます" }, { status: 409 });
     }
-    status = "受付中"; nextState = { ...state, deadline: Date.now() + 60000 };
+    status = "受付中"; nextState = { ...state, deadline: typeof body.deadline === "number" && body.deadline > Date.now() ? body.deadline : Date.now() + 60000 };
   } else if (action === "confirm") {
     if (!isOrganizer || current.status !== "受付中") return Response.json({ error: "受付中の回戦だけ確定できます" }, { status: 403 });
     const entries = await env.DB.prepare("SELECT DISTINCT nickname FROM tournament_entries WHERE tournament_id = ? AND round = ? AND joined = 1 ORDER BY nickname").bind(tournamentId, round).all<{ nickname: string }>();
     status = "確定"; nextState = { tables: buildTables(entries.results.map((entry: { nickname: string }) => entry.nickname)) };
+  } else if (action === "schedule") {
+    if (!isOrganizer || current.status !== "受付中") return Response.json({ error: "受付中の回戦だけ終了予約できます" }, { status: 403 });
+    const deadline = typeof body.deadline === "number" && body.deadline > Date.now() ? body.deadline : 0;
+    if (!deadline) return Response.json({ error: "有効な終了予定時刻が必要です" }, { status: 400 });
+    nextState = { ...state, deadline };
   } else {
     const tableIndex = typeof body.tableIndex === "number" ? body.tableIndex : -1;
     const table = state.tables[tableIndex];
