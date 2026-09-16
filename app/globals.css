@@ -134,3 +134,4 @@ button { cursor: pointer; }
 .jm-mapping-note { margin: 0 0 16px; padding: 12px 14px; border-radius: 10px; background: #eef5e6; color: #5c6d61; font-size: 12px; line-height: 1.7; }
 .jm-card-owner { margin: 8px 0 0; color: #52645a; font-size: 12px; }.jm-card-edit { display: inline-block; margin-left: 12px; color: #087d70; font-size: 12px; font-weight: 700; }
 .jm-card-main { display: block; color: inherit; text-decoration: none; }.jm-card-edit { margin-top: 14px; margin-left: 0; }
+.jm-card-actions { display: flex; gap: 8px; margin-top: 16px; }.jm-card-actions a { display: inline-block; border-radius: 8px; padding: 8px 14px; text-decoration: none; font-size: 12px; font-weight: 700; }.jm-action-join { background: #087d70; color: #fff; }.jm-action-admin { background: #fff0df; border: 1px solid #e9a45f; color: #b96518; }
