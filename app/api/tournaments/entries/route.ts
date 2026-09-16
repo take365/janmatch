@@ -11,7 +11,7 @@ export async function GET(request: Request) {
   if (!tournament) return Response.json({ error: "大会が見つかりません" }, { status: 404 });
   const isOrganizer = profile.nickname === tournament.owner;
   if (tournament.password && !isOrganizer && !hasTournamentAccess(request, tournamentId)) return Response.json({ error: "大会のパスワードが必要です" }, { status: 403 });
-  const result = await env.DB.prepare("SELECT round, joined FROM tournament_entries WHERE tournament_id = ? AND nickname = ? ORDER BY round").bind(tournamentId, profile.nickname).all();
+  const result = await env.DB.prepare("SELECT round, joined, game_name as gameName FROM tournament_entries WHERE tournament_id = ? AND nickname = ? ORDER BY round").bind(tournamentId, profile.nickname).all();
   return Response.json(result.results);
 }
 
@@ -27,6 +27,6 @@ export async function POST(request: Request) {
   const isOrganizer = profile.nickname === tournament.owner;
   if (tournament.password && !isOrganizer && !hasTournamentAccess(request, tournamentId)) return Response.json({ error: "大会のパスワードが必要です" }, { status: 403 });
   const id = `${tournamentId}:${profile.nickname}:${round}`;
-  await env.DB.prepare("INSERT INTO tournament_entries (id, tournament_id, nickname, round, joined) VALUES (?, ?, ?, ?, ?) ON CONFLICT(tournament_id, nickname, round) DO UPDATE SET joined = excluded.joined").bind(id, tournamentId, profile.nickname, round, body.joined === true ? 1 : 0).run();
+  await env.DB.prepare("INSERT INTO tournament_entries (id, tournament_id, nickname, game_name, round, joined) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(tournament_id, nickname, round) DO UPDATE SET joined = excluded.joined, game_name = CASE WHEN excluded.joined = 1 THEN excluded.game_name ELSE tournament_entries.game_name END").bind(id, tournamentId, profile.nickname, profile.gameName, round, body.joined === true ? 1 : 0).run();
   return Response.json({ ok: true, round, joined: body.joined === true });
 }

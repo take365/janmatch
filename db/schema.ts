@@ -38,7 +38,7 @@ export const apiTokens = sqliteTable("api_tokens", {
 export const tournaments = sqliteTable("tournaments", {
   id: text("id").primaryKey(), owner: text("owner").notNull(), name: text("name").notNull(), gameType: text("game_type").notNull(), startAt: text("start_at").notNull(), password: text("password").notNull(), rounds: integer("rounds").notNull(), pairingMode: text("pairing_mode").notNull(), uma: text("uma").notNull(), notice: text("notice").notNull().default(""), phase: text("phase").notNull().default("before"), createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
-export const tournamentEntries = sqliteTable("tournament_entries", { id: text("id").primaryKey(), tournamentId: text("tournament_id").notNull(), nickname: text("nickname").notNull(), round: integer("round").notNull(), joined: integer("joined", { mode: "boolean" }).notNull().default(true), createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`) });
+export const tournamentEntries = sqliteTable("tournament_entries", { id: text("id").primaryKey(), tournamentId: text("tournament_id").notNull(), nickname: text("nickname").notNull(), gameName: text("game_name").notNull().default(""), round: integer("round").notNull(), joined: integer("joined", { mode: "boolean" }).notNull().default(true), createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`) });
 export const tournamentRounds = sqliteTable("tournament_rounds", {
   tournamentId: text("tournament_id").notNull(),
   round: integer("round").notNull(),

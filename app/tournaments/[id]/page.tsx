@@ -66,7 +66,7 @@ export default function TournamentPage() {
   const setRoom = (roundIndex: number, tableIndex: number, value: string) => { void mutateRound(roundIndex, "room", { tableIndex, roomId: value }).then((saved) => { if (saved) setEditing(null); }); };
   const setScores = (roundIndex: number, tableIndex: number, value: string) => {
     const scores = value.split(",").map((item) => Number(item.trim()));
-    if (scores.length !== 4 || scores.some((item) => !Number.isFinite(item)) || scores.reduce((sum, item) => sum + item, 0) !== 1000) { setMessage("4人の点数は合計1000で入力してください"); return; }
+    if (scores.length !== 4 || scores.some((item) => !Number.isFinite(item) || !Number.isInteger(item)) || scores.reduce((sum, item) => sum + item, 0) !== 100000) { setMessage("4人の生点は整数で、合計100000になるよう入力してください"); return; }
     void mutateRound(roundIndex, "scores", { tableIndex, scores }).then((saved) => { if (saved) { setEditing(null); setMessage("結果を登録しました。全員の承認待ちです"); } });
   };
   const approve = (roundIndex: number, tableIndex: number) => { void mutateRound(roundIndex, "approve", { tableIndex }); };
