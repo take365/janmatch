@@ -17,7 +17,7 @@ function buildTables(names: string[]): Table[] {
   const tables: Table[] = [];
   for (let index = 0; index < unique.length; index += 4) {
     const members = unique.slice(index, index + 4);
-    tables.push({ label: `${String.fromCharCode(65 + tables.length)}卓`, members, representative: members[0] });
+    tables.push({ label: `卓${String.fromCharCode(65 + tables.length)}`, members, representative: members[0] });
   }
   return tables;
 }
