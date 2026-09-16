@@ -74,15 +74,17 @@ export async function PUT(request: Request) {
     if (!table) return Response.json({ error: "卓が見つかりません" }, { status: 400 });
     if (action === "room") {
       if (table.representative !== profile.nickname && !isOrganizer) return Response.json({ error: "卓の代表者だけがルームIDを変更できます" }, { status: 403 });
+      if (current.status !== "確定" || table.resultStatus === "結果確定") return Response.json({ error: "確定済みの卓だけ編集できます" }, { status: 403 });
       const roomId = typeof body.roomId === "string" ? body.roomId.trim() : "";
       nextState = { ...state, tables: state.tables.map((item, index) => index === tableIndex ? { ...item, roomId: roomId || undefined } : item) };
     } else if (action === "scores") {
       if (table.representative !== profile.nickname && !isOrganizer) return Response.json({ error: "卓の代表者だけが結果を登録できます" }, { status: 403 });
+      if (current.status !== "確定" || table.resultStatus === "結果確定") return Response.json({ error: "承認待ちまたは未登録の結果だけ編集できます" }, { status: 403 });
       const scores = Array.isArray(body.scores) ? body.scores.map((value) => typeof value === "number" ? value : Number(value)) : [];
       if (scores.length !== 4 || scores.some((value) => !Number.isFinite(value)) || scores.reduce((sum, value) => sum + value, 0) !== 1000) return Response.json({ error: "4人の点数は合計1000で入力してください" }, { status: 400 });
       nextState = { ...state, tables: state.tables.map((item, index) => index === tableIndex ? { ...item, scores, approvals: [], resultStatus: "結果登録済み（承認待ち）" } : item) };
     } else if (action === "approve") {
-      if (!table.members.includes(profile.nickname) || !table.scores) return Response.json({ error: "卓の参加者だけが結果を承認できます" }, { status: 403 });
+      if (current.status !== "確定" || table.resultStatus !== "結果登録済み（承認待ち）" || !table.members.includes(profile.nickname) || !table.scores) return Response.json({ error: "承認待ちの卓の参加者だけが結果を承認できます" }, { status: 403 });
       const approvals = [...new Set([...(table.approvals ?? []), profile.nickname])];
       nextState = { ...state, tables: state.tables.map((item, index) => index === tableIndex ? { ...item, approvals, resultStatus: approvals.length >= item.members.length ? "結果確定" : "結果登録済み（承認待ち）" } : item) };
     } else return Response.json({ error: "未対応の操作です" }, { status: 400 });
