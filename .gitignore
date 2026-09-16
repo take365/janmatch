@@ -6,3 +6,10 @@ dist/
 *.tar
 *.tar.gz
 *.log
+
+# Retired My Day artifacts are not part of the JanMatch runtime.
+/legacy/
+/db/index.ts
+/drizzle/0000_soft_otto_octavius.sql
+/drizzle/0001_add_api_tokens.sql
+/drizzle/meta/
