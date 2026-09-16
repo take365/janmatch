@@ -6,8 +6,6 @@ type Phase = "before" | "active" | "ended";
 type Tournament = { id: string; name: string; gameType?: string; date: string; rounds: number; status: string; color: string; pairingMode?: string; phase?: Phase; owner?: string };
 const initialTournaments: Tournament[] = [
   { id: "janmatch-01", name: "第1回 JanMatch交流戦", gameType: "雀魂-じゃんたま-", date: "2026年10月12日（月）20:00開始", rounds: 4, status: "開催前", color: "green", pairingMode: "最終戦だけ順位卓", phase: "before", owner: "きたろう" },
-  { id: "janmatch-test", name: "JanMatchテスト大会", gameType: "雀魂-じゃんたま-", date: "2026年9月16日（水）開催中", rounds: 3, status: "開催中", color: "blue", pairingMode: "重複回避ランダム", phase: "active", owner: "運営テスト" },
-  { id: "janmatch-finished", name: "JanMatchサンプル大会", gameType: "雀魂-じゃんたま-", date: "2026年9月1日（火）終了", rounds: 4, status: "終了", color: "gray", pairingMode: "2回戦目以降すべて順位卓", phase: "ended", owner: "きたろう" },
 ];
 const phaseLabels: { value: Phase; label: string }[] = [{ value: "before", label: "開催前" }, { value: "active", label: "開催中" }, { value: "ended", label: "終了" }];
 function normalizePhase(t: Tournament): Phase { if (t.phase) return t.phase; if (t.status === "終了") return "ended"; if (t.status === "開催中") return "active"; return "before"; }
@@ -16,7 +14,7 @@ export default function TournamentListPage() {
   const [tournaments, setTournaments] = useState(initialTournaments);
   const [selected, setSelected] = useState<Phase[]>(["before", "active"]);
   const [currentNickname, setCurrentNickname] = useState("");
-  useEffect(() => { const saved = window.localStorage.getItem("janmatch:tournaments"); if (saved) setTournaments([...JSON.parse(saved), ...initialTournaments]); setCurrentNickname(window.localStorage.getItem("janmatch:nickname") ?? ""); }, []);
+  useEffect(() => { const saved = window.localStorage.getItem("janmatch:tournaments"); if (saved) { const cleaned = JSON.parse(saved).filter((item: Tournament) => !/テスト|サンプル/.test(item.name)); window.localStorage.setItem("janmatch:tournaments", JSON.stringify(cleaned)); setTournaments([...cleaned, ...initialTournaments]); } setCurrentNickname(window.localStorage.getItem("janmatch:nickname") ?? ""); }, []);
   const visible = useMemo(() => tournaments.filter((t) => selected.includes(normalizePhase(t))), [selected, tournaments]);
   const toggle = (phase: Phase) => setSelected((current) => current.includes(phase) ? current.filter((value) => value !== phase) : [...current, phase]);
   return <main className="jm-user-shell">
