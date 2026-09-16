@@ -1,10 +1,84 @@
 "use client";
-import Link from "next/link"; import { useEffect, useMemo, useState } from "react"; import { useParams, useSearchParams } from "next/navigation";
-type Table={label:string;members:string[];representative:string;roomId?:string;scores?:number[];approvals?:string[];resultStatus?:string}; type Round={status:string;tables:Table[]}; type Tournament={id:string;name:string;date?:string;startAt?:string;password?:string;rounds:number;notice?:string;owner?:string;gameType?:string;pairingMode?:string};
-const fallback:Tournament={id:"janmatch-01",name:"第1回 JanMatch交流戦",date:"2026年10月12日（月）20:00開始",password:"JMP2026",rounds:4,notice:"東南戦／25000点持ち。",owner:"きたろう",gameType:"雀魂-じゃんたま-",pairingMode:"最終戦だけ順位卓"};
-export default function TournamentPage(){const {id}=useParams<{id:string}>();const sp=useSearchParams();const [t,setT]=useState(fallback);const [nick,setNick]=useState("");const [pw,setPw]=useState("");const [open,setOpen]=useState(false);const [rounds,setRounds]=useState<Round[]>([]);const [entries,setEntries]=useState<boolean[]>([]);const [msg,setMsg]=useState("");const manage=sp.get("mode")==="manage";
-useEffect(()=>{const n=localStorage.getItem("janmatch:nickname")??"";setNick(n);if(document.cookie.includes(`janmatch_access_${id}=1`))setOpen(true);fetch(`/api/tournaments?id=${id}`).then(r=>r.json()).then((f:Tournament)=>{const x=f||fallback;setT({...x,date:x.date??x.startAt});if(!x.password)setOpen(true);setRounds(Array.from({length:x.rounds},()=>({status:"受付前",tables:[]})));fetch(`/api/tournaments/entries?tournamentId=${id}&nickname=${encodeURIComponent(n)}`).then(r=>r.ok?r.json():[]).then((rows:any[])=>setEntries(Array.from({length:x.rounds},(_,i)=>Boolean(rows.find(v=>v.round===i+1)?.joined))));}).catch(()=>setRounds(Array.from({length:fallback.rounds},()=>({status:"受付前",tables:[]}))));},[id]);
-const save=(v:Round[])=>{setRounds(v);localStorage.setItem(`janmatch:rounds:${id}`,JSON.stringify(v));};const toggle=async(i:number)=>{const v=entries.map((x,j)=>j===i?!x:x);setEntries(v);await fetch("/api/tournaments/entries",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({tournamentId:id,nickname:nick,round:i+1,joined:v[i]})});};const joinCount=useMemo(()=>entries.filter(Boolean).length,[entries]);
-const approve=(ri:number,ti:number,table:Table)=>{const a=[...(table.approvals??[]),nick].filter((v,i,x)=>v&&x.indexOf(v)===i);const status=a.length>=table.members.length?"結果確定":"結果登録済み（承認待ち）";save(rounds.map((r,i)=>i===ri?{...r,tables:r.tables.map((x,j)=>j===ti?{...x,approvals:a,resultStatus:status}:x)}:r));};
-const unlock=()=>{if(!t.password||pw===t.password){document.cookie=`janmatch_access_${id}=1; max-age=10368000; path=/; samesite=lax`;setOpen(true);}else setMsg("パスワードが違います");};
-return <main className="jm-user-shell jm-narrow"><Link className="jm-back" href="/">← 大会一覧</Link><div className="jm-detail-title"><div><span className="jm-status">開催前</span><h1>{t.name}</h1><p>{t.date}</p><p className="jm-card-owner">主催者：{t.owner}</p></div><Link href="/profile" className="jm-outline">ニックネーム変更</Link></div>{!open?<section className="jm-lock-card"><h2>参加用パスワードを入力</h2><div className="jm-password-row"><input type="password" value={pw} onChange={e=>setPw(e.target.value)}/><button className="jm-primary" onClick={unlock}>大会を開く</button></div>{msg&&<p className="jm-error">{msg}</p>}</section>:<section className="jm-detail-card"><div className="jm-round-head"><h2>{manage?"受付・卓組み管理":"回戦受付"}</h2>{!manage&&<span>{joinCount}/{t.rounds}回戦 参加</span>}</div>{rounds.map((r,ri)=><div className="jm-round-block" key={ri}><h3>{ri+1}回戦 <small>{r.status}</small></h3>{manage&&r.status==="受付前"&&<button className="jm-primary" onClick={()=>save(rounds.map((x,i)=>i===ri?{...x,status:"受付中"}:x))}>受付開始（60秒）</button>}{manage&&r.status==="受付中"&&<button className="jm-primary" onClick={()=>save(rounds.map((x,i)=>i===ri?{...x,status:"確定",tables:[]}:x))}>参加者を確定</button>}{!manage&&<button className={entries[ri]?"joined":""} onClick={()=>toggle(ri)}>{entries[ri]?"参加登録を取り消す":"参加登録"}</button>}{r.tables.map((table,ti)=><div className="jm-table-row" key={table.label}><b>{table.label}</b><span>{table.members.join("・")}</span><small>代表者：{table.representative}{table.roomId?` / ルームID：${table.roomId}`:""}</small>{table.scores&&<small>{table.scores.join(" / ")}　{table.resultStatus}</small>}{!manage&&table.scores&&table.members.includes(nick)&&table.resultStatus!=="結果確定"&&<button onClick={()=>approve(ri,ti,table)}>結果承認</button>}</div>)}</div>)}</section>}</main>}
+
+import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
+import { useParams, useSearchParams } from "next/navigation";
+
+type Table = { label: string; members: string[]; representative: string; roomId?: string; scores?: number[]; approvals?: string[]; resultStatus?: string };
+type Round = { round: number; status: string; deadline?: number; tables: Table[]; version: number };
+type Tournament = { id: string; name: string; date?: string; startAt?: string; rounds: number; notice?: string; owner?: string; gameType?: string; pairingMode?: string; phase?: "before" | "active" | "ended"; passwordRequired: boolean; accessGranted: boolean; isOrganizer: boolean };
+
+const phaseLabels = { before: "開催前", active: "開催中", ended: "終了" };
+
+export default function TournamentPage() {
+  const { id } = useParams<{ id: string }>();
+  const searchParams = useSearchParams();
+  const [tournament, setTournament] = useState<Tournament | null>(null);
+  const [nickname, setNickname] = useState("");
+  const [password, setPassword] = useState("");
+  const [unlocked, setUnlocked] = useState(false);
+  const [organizer, setOrganizer] = useState(false);
+  const [rounds, setRounds] = useState<Round[]>([]);
+  const [entries, setEntries] = useState<boolean[]>([]);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const manage = searchParams.get("mode") === "manage" && organizer;
+
+  const load = async () => {
+    const profileResponse = await fetch("/api/profile");
+    const profile = profileResponse.ok ? await profileResponse.json() as { nickname?: string } : { nickname: "" };
+    const nick = profile.nickname ?? "";
+    setNickname(nick);
+    const response = await fetch(`/api/tournaments?id=${encodeURIComponent(id)}`);
+    if (!response.ok) throw new Error("大会データを取得できませんでした。");
+    const data = await response.json() as Tournament & { roundStates?: Round[] };
+    if (!data) throw new Error("大会が見つかりません。");
+    setTournament({ ...data, date: data.date ?? data.startAt });
+    setOrganizer(Boolean(data.isOrganizer));
+    setUnlocked(Boolean(data.accessGranted));
+    setRounds(data.roundStates ?? []);
+    const entriesResponse = nick ? await fetch(`/api/tournaments/entries?tournamentId=${encodeURIComponent(id)}`) : null;
+    const rows = entriesResponse?.ok ? await entriesResponse.json() as Array<{ round: number; joined: boolean | number }> : [];
+    setEntries(Array.from({ length: data.rounds }, (_, index) => Boolean(rows.find((row) => row.round === index + 1)?.joined)));
+  };
+
+  useEffect(() => { load().catch((reason: unknown) => setError(reason instanceof Error ? reason.message : "大会データを取得できませんでした。")); }, [id]);
+
+  const mutateRound = async (roundIndex: number, action: string, extra: Record<string, unknown> = {}) => {
+    const round = rounds[roundIndex];
+    if (!round) return false;
+    const response = await fetch("/api/tournaments/state", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ tournamentId: id, round: round.round, expectedVersion: round.version, action, ...extra }) });
+    const payload = await response.json() as Round & { error?: string; current?: Round };
+    if (response.status === 409 && payload.current) setRounds((current) => current.map((item) => item.round === payload.current?.round ? payload.current : item));
+    if (!response.ok) { setMessage(payload.error ?? "大会状態の保存に失敗しました"); return false; }
+    setRounds((current) => current.map((item) => item.round === payload.round ? payload : item));
+    return true;
+  };
+
+  const toggleEntry = async (index: number) => {
+    const joined = !entries[index];
+    setEntries((current) => current.map((value, itemIndex) => itemIndex === index ? joined : value));
+    const response = await fetch("/api/tournaments/entries", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ tournamentId: id, round: index + 1, joined }) });
+    if (!response.ok) { setEntries((current) => current.map((value, itemIndex) => itemIndex === index ? !joined : value)); const payload = await response.json().catch(() => null) as { error?: string } | null; setMessage(payload?.error ?? "参加登録の保存に失敗しました"); }
+  };
+
+  const setRoom = (roundIndex: number, tableIndex: number, value: string) => { void mutateRound(roundIndex, "room", { tableIndex, roomId: value }); };
+  const setScores = (roundIndex: number, tableIndex: number, value: string) => {
+    const scores = value.split(",").map((item) => Number(item.trim()));
+    if (scores.length !== 4 || scores.some((item) => !Number.isFinite(item)) || scores.reduce((sum, item) => sum + item, 0) !== 1000) { setMessage("4人の点数は合計1000で入力してください"); return; }
+    void mutateRound(roundIndex, "scores", { tableIndex, scores }).then((saved) => { if (saved) setMessage("結果を登録しました。全員の承認待ちです"); });
+  };
+  const approve = (roundIndex: number, tableIndex: number) => { void mutateRound(roundIndex, "approve", { tableIndex }); };
+  const unlock = async () => {
+    const response = await fetch("/api/tournaments/access", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ tournamentId: id, password }) });
+    const payload = await response.json().catch(() => null) as { error?: string } | null;
+    if (!response.ok) { setMessage(payload?.error ?? "大会を開けませんでした"); return; }
+    setUnlocked(true); setMessage("大会内容を確認できます（次回から入力不要）"); await load();
+  };
+
+  const joinedCount = useMemo(() => entries.filter(Boolean).length, [entries]);
+  if (error) return <main className="jm-user-shell jm-narrow"><Link className="jm-back" href="/">← 大会一覧</Link><p className="jm-error">{error}</p></main>;
+  if (!tournament) return <main className="jm-user-shell jm-narrow"><p>大会データを読み込んでいます。</p></main>;
+  const phase = tournament.phase ?? "before";
+  return <main className="jm-user-shell jm-narrow"><Link className="jm-back" href="/">← 大会一覧</Link><div className="jm-detail-title"><div><span className="jm-status">{phaseLabels[phase]}</span><h1>{tournament.name}</h1><p>{tournament.date}</p><p className="jm-card-owner">主催者：{tournament.owner ?? "未設定"}</p></div><Link href="/profile" className="jm-outline">ニックネーム変更</Link></div>{!unlocked ? <section className="jm-lock-card"><h2>参加用パスワードを入力</h2><div className="jm-password-row"><input type="password" value={password} onChange={(event) => setPassword(event.target.value)} /><button className="jm-primary" onClick={unlock}>大会を開く</button></div>{message && <p className="jm-error">{message}</p>}</section> : <><section className="jm-detail-card"><p className="janmatch-kicker">ABOUT</p><h2>大会概要</h2><p>{tournament.gameType} / 全{tournament.rounds}回戦 / 組み合わせ：{tournament.pairingMode}</p><p>{tournament.notice}</p></section><section className="jm-detail-card"><div className="jm-round-head"><h2>{manage ? "受付・卓組み管理" : "回戦受付"}</h2>{!manage && <span>{joinedCount}/{tournament.rounds}回戦 参加</span>}</div>{rounds.map((round, roundIndex) => <div className="jm-round-block" key={round.round}><h3>{round.round}回戦 <small>{round.status}</small></h3>{manage && round.status === "受付前" && <button className="jm-primary" onClick={() => void mutateRound(roundIndex, "start")}>受付開始（60秒）</button>}{manage && round.status === "受付中" && <button className="jm-primary" onClick={() => void mutateRound(roundIndex, "confirm")}>参加者を確定して卓決め</button>}{!manage && <button className={entries[roundIndex] ? "joined" : ""} onClick={() => void toggleEntry(roundIndex)}>{entries[roundIndex] ? "参加登録を取り消す" : "参加登録"}</button>}{round.tables.map((table, tableIndex) => <div className="jm-table-row" key={table.label}><b>{table.label}</b><span>{table.members.join("・")}</span><small>代表者：{table.representative}{table.roomId ? ` / ルームID：${table.roomId}` : ""}</small>{table.scores && <small>{table.scores.join(" / ")}　{table.resultStatus}　承認 {table.approvals?.length ?? 0}/{table.members.length}</small>}{table.representative === nickname && <><input placeholder="ルームID" defaultValue={table.roomId ?? ""} onBlur={(event) => setRoom(roundIndex, tableIndex, event.target.value)} /><input placeholder="点数4人分（例: 250,250,250,250）" defaultValue={table.scores?.join(",") ?? ""} onBlur={(event) => setScores(roundIndex, tableIndex, event.target.value)} /></>}{table.scores && table.members.includes(nickname) && table.resultStatus !== "結果確定" && <button onClick={() => approve(roundIndex, tableIndex)}>結果承認</button>}</div>)}</div>)}{message && <p className="jm-success">{message}</p>}</section></>}</main>;
+}
