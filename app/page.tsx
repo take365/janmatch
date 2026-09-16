@@ -14,7 +14,7 @@ export default function TournamentListPage() {
   const [tournaments, setTournaments] = useState(initialTournaments);
   const [selected, setSelected] = useState<Phase[]>(["before", "active"]);
   const [currentNickname, setCurrentNickname] = useState("");
-  useEffect(() => { const saved = window.localStorage.getItem("janmatch:tournaments"); if (saved) { const cleaned = JSON.parse(saved).filter((item: Tournament) => !/テスト|サンプル/.test(item.name)); window.localStorage.setItem("janmatch:tournaments", JSON.stringify(cleaned)); setTournaments([...cleaned, ...initialTournaments]); } setCurrentNickname(window.localStorage.getItem("janmatch:nickname") ?? ""); }, []);
+  useEffect(() => { const saved = window.localStorage.getItem("janmatch:tournaments"); if (saved) setTournaments([...JSON.parse(saved), ...initialTournaments]); setCurrentNickname(window.localStorage.getItem("janmatch:nickname") ?? ""); }, []);
   const visible = useMemo(() => tournaments.filter((t) => selected.includes(normalizePhase(t))), [selected, tournaments]);
   const toggle = (phase: Phase) => setSelected((current) => current.includes(phase) ? current.filter((value) => value !== phase) : [...current, phase]);
   return <main className="jm-user-shell">
