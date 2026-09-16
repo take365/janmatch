@@ -24,6 +24,8 @@ export async function POST(request: Request) {
   if (!profile) return Response.json({ error: "先に利用者登録をしてください" }, { status: 401 });
   const tournament = await env.DB.prepare("SELECT rounds, phase, password, owner FROM tournaments WHERE id = ?").bind(tournamentId).first<{ rounds: number; phase: string; password: string; owner: string }>();
   if (!tournament || !Number.isInteger(round) || round < 1 || round > tournament.rounds) return Response.json({ error: "大会または回戦が見つかりません" }, { status: 400 });
+  const roundState = await env.DB.prepare("SELECT status FROM tournament_rounds WHERE tournament_id = ? AND round = ?").bind(tournamentId, round).first<{ status: string }>();
+  if (!roundState || roundState.status !== "受付中") return Response.json({ error: roundState?.status === "確定" ? "この回戦は参加受付を終了しています" : "この回戦はまだ受付を開始していません" }, { status: 409 });
   const isOrganizer = profile.nickname === tournament.owner;
   if (tournament.password && !isOrganizer && !hasTournamentAccess(request, tournamentId)) return Response.json({ error: "大会のパスワードが必要です" }, { status: 403 });
   const id = `${tournamentId}:${profile.nickname}:${round}`;
