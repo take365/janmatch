@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 
 type Table = { label: string; members: string[]; representative: string; roomId?: string; scores?: number[] };
 type Round = { status: "受付前" | "受付中" | "確定"; deadline?: number; tables: Table[] };
@@ -9,9 +9,9 @@ type Tournament = { id: string; name: string; date?: string; startAt?: string; p
 const fallback: Tournament = { id: "janmatch-01", name: "第1回 JanMatch交流戦", date: "2026年10月12日（月）20:00開始", password: "JMP2026", rounds: 4, notice: "東南戦／25000点持ち。", owner: "きたろう", gameType: "雀魂-じゃんたま-", pairingMode: "最終戦だけ順位卓" };
 
 export default function TournamentPage() {
-  const { id } = useParams<{ id: string }>(); const [tournament, setTournament] = useState(fallback); const [nickname, setNickname] = useState(""); const [password, setPassword] = useState(""); const [unlocked, setUnlocked] = useState(false); const [rounds, setRounds] = useState<Round[]>([]); const [entries, setEntries] = useState<boolean[]>([]); const [message, setMessage] = useState("");
+  const { id } = useParams<{ id: string }>(); const searchParams = useSearchParams(); const [tournament, setTournament] = useState(fallback); const [nickname, setNickname] = useState(""); const [password, setPassword] = useState(""); const [unlocked, setUnlocked] = useState(false); const [rounds, setRounds] = useState<Round[]>([]); const [entries, setEntries] = useState<boolean[]>([]); const [message, setMessage] = useState("");
   useEffect(() => { const nick = window.localStorage.getItem("janmatch:nickname") ?? ""; setNickname(nick); fetch(`/api/tournaments?id=${encodeURIComponent(id)}`).then((response) => response.ok ? response.json() : Promise.reject()).then((found: Tournament | null) => { const t = found ? { ...found, date: found.date ?? found.startAt } : fallback; setTournament(t); setRounds(Array.from({ length: t.rounds }, () => ({ status: "受付前", tables: [] }))); setEntries(Array.from({ length: t.rounds }, () => false)); }).catch(() => { setTournament(fallback); setRounds(Array.from({ length: fallback.rounds }, () => ({ status: "受付前", tables: [] }))); setEntries(Array.from({ length: fallback.rounds }, () => false)); }); }, [id]);
-  const isOrganizer = nickname !== "" && nickname === tournament.owner; const currentRound = rounds.findIndex((round) => round.status !== "確定"); const joinedCount = useMemo(() => entries.filter(Boolean).length, [entries]);
+  const isOrganizer = searchParams.get("mode") === "manage" && nickname !== "" && nickname === tournament.owner; const currentRound = rounds.findIndex((round) => round.status !== "確定"); const joinedCount = useMemo(() => entries.filter(Boolean).length, [entries]);
   const saveRounds = (next: Round[]) => { setRounds(next); window.localStorage.setItem(`janmatch:rounds:${id}`, JSON.stringify(next)); };
   const toggleEntry = (index: number) => { const next = entries.map((v, i) => i === index ? !v : v); setEntries(next); window.localStorage.setItem(`janmatch:entries:${id}:${nickname}`, JSON.stringify(next)); };
   const start受付 = (index: number) => { if (index > 0 && rounds[index - 1]?.status !== "確定") { setMessage("前の回戦が完了してから開始できます"); return; } const next = rounds.map((r, i) => i === index ? { ...r, status: "受付中" as const, deadline: Date.now() + 60000 } : r); saveRounds(next); };
