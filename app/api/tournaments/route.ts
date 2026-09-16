@@ -11,7 +11,7 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   const body = await request.json() as Record<string, unknown>;
-  const required = ["id", "owner", "name", "gameType", "startAt", "password", "rounds", "pairingMode", "uma"];
+  const required = ["id", "owner", "name", "gameType", "startAt", "rounds", "pairingMode", "uma"];
   if (required.some((key) => body[key] === undefined || body[key] === "")) return Response.json({ error: "必須項目が不足しています" }, { status: 400 });
   const db = getDb(); if (!db) return Response.json({ error: "D1 binding is unavailable" }, { status: 503 });
   await db.prepare("INSERT INTO tournaments (id, owner, name, game_type, start_at, password, rounds, pairing_mode, uma, notice, phase) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'before')").bind(body.id, body.owner, body.name, body.gameType, body.startAt, body.password, body.rounds, body.pairingMode, JSON.stringify(body.uma), body.notice ?? "").run();
