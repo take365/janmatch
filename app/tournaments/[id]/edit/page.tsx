@@ -1,23 +1,12 @@
 "use client";
-
 import Link from "next/link";
 import { FormEvent, useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 
 export default function EditTournamentPage() {
-  const { id } = useParams<{ id: string }>();
-  const router = useRouter();
-  const [tournament, setTournament] = useState<any>(null);
-  const [name, setName] = useState("");
-  const [notice, setNotice] = useState("");
-  const [error, setError] = useState("");
-  useEffect(() => {
-    const list = JSON.parse(window.localStorage.getItem("janmatch:tournaments") ?? "[]");
-    const found = list.find((item: any) => item.id === id);
-    const nickname = window.localStorage.getItem("janmatch:nickname") ?? "";
-    if (!found || found.owner !== nickname || (found.phase ?? "before") !== "before") { setError("開催前の大会で、作成者本人のみ編集できます。"); return; }
-    setTournament(found); setName(found.name); setNotice(found.notice ?? "");
-  }, [id]);
-  const submit = (event: FormEvent) => { event.preventDefault(); if (!tournament || !name.trim()) return; const list = JSON.parse(window.localStorage.getItem("janmatch:tournaments") ?? "[]"); window.localStorage.setItem("janmatch:tournaments", JSON.stringify(list.map((item: any) => item.id === id ? { ...item, name: name.trim(), notice } : item))); router.push("/"); };
-  return <main className="jm-user-shell jm-narrow"><Link className="jm-back" href="/">← 大会一覧</Link><p className="janmatch-kicker">TOURNAMENT SETTINGS</p><h1>大会を編集</h1>{error ? <section className="jm-lock-card"><p className="jm-error">{error}</p></section> : tournament && <form className="jm-form-card jm-create-form" onSubmit={submit}><p className="jm-form-note">主催者：{tournament.owner}</p><label>大会名<input value={name} onChange={(event) => setName(event.target.value)} maxLength={80} /></label><label>ルール・お知らせ<textarea value={notice} onChange={(event) => setNotice(event.target.value)} /></label><div className="jm-form-actions"><Link className="jm-cancel" href="/">キャンセル</Link><button className="jm-primary" type="submit">変更を保存</button></div></form>}</main>;
+  const { id } = useParams<{ id: string }>(); const router = useRouter();
+  const [item, setItem] = useState<any>(null); const [name, setName] = useState(""); const [gameType, setGameType] = useState(""); const [password, setPassword] = useState(""); const [rounds, setRounds] = useState("4"); const [pairingMode, setPairingMode] = useState(""); const [notice, setNotice] = useState(""); const [error, setError] = useState("");
+  useEffect(() => { const list = JSON.parse(window.localStorage.getItem("janmatch:tournaments") ?? "[]"); const found = list.find((value: any) => value.id === id); const nickname = window.localStorage.getItem("janmatch:nickname") ?? ""; if (!found || found.owner !== nickname || (found.phase ?? "before") !== "before") { setError("開催前の大会で、作成者本人のみ編集できます。"); return; } setItem(found); setName(found.name); setGameType(found.gameType ?? "雀魂-じゃんたま-"); setPassword(found.password ?? ""); setRounds(String(found.rounds)); setPairingMode(found.pairingMode ?? ""); setNotice(found.notice ?? ""); }, [id]);
+  const submit = (event: FormEvent) => { event.preventDefault(); if (!item || !name.trim() || !password.trim()) { setError("大会名と参加パスワードを入力してください"); return; } const list = JSON.parse(window.localStorage.getItem("janmatch:tournaments") ?? "[]"); window.localStorage.setItem("janmatch:tournaments", JSON.stringify(list.map((value: any) => value.id === id ? { ...value, name: name.trim(), gameType: gameType.trim() || "雀魂-じゃんたま-", password, rounds: Number(rounds), pairingMode, notice } : value))); router.push("/"); };
+  return <main className="jm-user-shell jm-narrow"><Link className="jm-back" href="/">← 大会一覧</Link><p className="janmatch-kicker">TOURNAMENT SETTINGS</p><h1>大会を編集</h1>{error ? <section className="jm-lock-card"><p className="jm-error">{error}</p></section> : item && <form className="jm-form-card jm-create-form" onSubmit={submit}><p className="jm-form-note">主催者：{item.owner}（開催前のみ編集できます）</p><label>大会名<input value={name} onChange={(event) => setName(event.target.value)} maxLength={80} /></label><label>ゲームの種類<input value={gameType} onChange={(event) => setGameType(event.target.value)} /></label><label>参加パスワード<input type="text" value={password} onChange={(event) => setPassword(event.target.value)} /></label><label>全回戦数<input type="number" value={rounds} onChange={(event) => setRounds(event.target.value)} min={1} max={20} /></label><label>組み合わせ方式<input value={pairingMode} onChange={(event) => setPairingMode(event.target.value)} /></label><label>ルール・お知らせ<textarea value={notice} onChange={(event) => setNotice(event.target.value)} /></label><div className="jm-form-actions"><Link className="jm-cancel" href="/">キャンセル</Link><button className="jm-primary" type="submit">変更を保存</button></div></form>}</main>;
 }
