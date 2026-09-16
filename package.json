@@ -13,6 +13,7 @@
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "db:generate": "drizzle-kit generate",
     "db:local:migrate": "wrangler d1 migrations apply janmatch-local --local",
+    "db:seed:demo": "node scripts/seed-demo.mjs",
     "discord:register": "node scripts/register-discord-command.mjs"
   },
   "dependencies": {
