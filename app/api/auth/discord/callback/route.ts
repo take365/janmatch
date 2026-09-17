@@ -2,7 +2,7 @@ import { env } from "cloudflare:workers";
 import { cookieHeader, getConfig, hash, OAUTH_STATE_COOKIE, redirectUri } from "../../../../lib/discord-auth";
 
 type DiscordUser = { id: string; username?: string; global_name?: string };
-function failure(request: Request, message: string) { return Response.redirect(`${new URL("/login", request.url).toString()}?error=${encodeURIComponent(message)}`, 302); }
+function failure(request: Request, message: string) { return new Response(null, { status: 302, headers: { Location: `${new URL("/login", request.url).toString()}?error=${encodeURIComponent(message)}` } }); }
 
 export async function GET(request: Request) {
   if (!env.DB) return failure(request, "認証データベースを利用できません");
@@ -21,6 +21,6 @@ export async function GET(request: Request) {
     const userId = crypto.randomUUID(); await env.DB.prepare("INSERT INTO users (id, discord_user_id, discord_username) VALUES (?, ?, ?) ON CONFLICT(discord_user_id) DO UPDATE SET discord_username = excluded.discord_username, updated_at = CURRENT_TIMESTAMP").bind(userId, user.id, user.global_name || user.username || user.id).run();
     const savedUser = await env.DB.prepare("SELECT id FROM users WHERE discord_user_id = ?").bind(user.id).first<{ id: string }>(); if (!savedUser) throw new Error("ユーザー保存に失敗しました");
     const rawSession = crypto.randomUUID(); await env.DB.prepare("INSERT INTO auth_sessions (id, user_id, token_hash, expires_at) VALUES (?, ?, ?, ?)").bind(crypto.randomUUID(), savedUser.id, await hash(rawSession), new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()).run();
-    const response = Response.redirect(new URL("/profile", request.url).toString(), 302); const secure = redirectUri(request).startsWith("https://"); response.headers.append("Set-Cookie", cookieHeader("janmatch_auth", rawSession, 30 * 24 * 60 * 60, secure)); response.headers.append("Set-Cookie", cookieHeader(OAUTH_STATE_COOKIE, "", 0, secure)); return response;
+    const secure = redirectUri(request).startsWith("https://"); const response = new Response(null, { status: 302, headers: { Location: new URL("/profile", request.url).toString() } }); response.headers.append("Set-Cookie", cookieHeader("janmatch_auth", rawSession, 30 * 24 * 60 * 60, secure)); response.headers.append("Set-Cookie", cookieHeader(OAUTH_STATE_COOKIE, "", 0, secure)); return response;
   } catch (error) { return failure(request, error instanceof Error ? error.message : "Discordログインに失敗しました"); }
 }

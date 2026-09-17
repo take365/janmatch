@@ -7,5 +7,5 @@ export async function GET(request: Request) {
   const state = crypto.randomUUID(); const stateHash = await hash(state); const expires = new Date(Date.now() + 10 * 60 * 1000).toISOString();
   await env.DB.prepare("INSERT INTO oauth_states (state_hash, expires_at) VALUES (?, ?)").bind(stateHash, expires).run();
   const value = getConfig(); const params = new URLSearchParams({ client_id: value.clientId ?? "", response_type: "code", redirect_uri: redirectUri(request), scope: "identify guilds.members.read", state });
-  const response = Response.redirect(`https://discord.com/oauth2/authorize?${params.toString()}`, 302); response.headers.append("Set-Cookie", cookieHeader(OAUTH_STATE_COOKIE, state, 600, redirectUri(request).startsWith("https://"))); return response;
+  return new Response(null, { status: 302, headers: { Location: `https://discord.com/oauth2/authorize?${params.toString()}`, "Set-Cookie": cookieHeader(OAUTH_STATE_COOKIE, state, 600, redirectUri(request).startsWith("https://")) } });
 }
