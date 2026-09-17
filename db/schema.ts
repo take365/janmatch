@@ -47,6 +47,13 @@ export const tournamentRounds = sqliteTable("tournament_rounds", {
   version: integer("version").notNull().default(0),
   updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
+export const tournamentNotifications = sqliteTable("tournament_notifications", {
+  eventKey: text("event_key").primaryKey(),
+  tournamentId: text("tournament_id").notNull(),
+  round: integer("round"),
+  eventType: text("event_type").notNull(),
+  sentAt: text("sent_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
 
 export const profiles = sqliteTable("profiles", {
   sessionId: text("session_id").primaryKey(),

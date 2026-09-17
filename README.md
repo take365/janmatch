@@ -34,9 +34,12 @@ DISCORD_CLIENT_ID=...
 DISCORD_CLIENT_SECRET=...
 DISCORD_GUILD_ID=対象DiscordサーバーのGuild ID
 APP_ORIGIN=http://localhost:3000
+DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
 ```
 
 `npm run db:local:migrate` 実行後、`/login` からDiscordログインを開始できます。対象Guildのメンバーであることを確認し、セッション値はハッシュ化してD1へ保存します。
+
+大会進行通知を使う場合は、Discordの対象チャンネルでIncoming Webhookを作成し、`DISCORD_WEBHOOK_URL` を `.dev.vars` または本番のシークレットへ設定します。Webhook URLはD1・画面・リポジトリ・通常ログには保存・表示しません。通知送信に失敗しても大会状態の更新は成功し、サーバーログで失敗を確認できます。送信済みイベントはD1で大会・回戦・通知種別ごとに一意管理します。
 
 ## ローカルD1の初期化・確認用シード
 

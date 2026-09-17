@@ -1,5 +1,6 @@
 import { env } from "cloudflare:workers";
 import { getProfile, hasTournamentAccess } from "../../../lib/session";
+import { getTournamentNotice, notifyTournament } from "../../../lib/discord-webhook";
 
 type Table = { label: string; members: string[]; memberIds?: string[]; representative: string; representativeUserId?: string; roomId?: string; scores?: number[]; approvals?: string[]; resultStatus?: string };
 type RoundState = { tables: Table[]; deadline?: number };
@@ -26,13 +27,35 @@ async function findRound(tournamentId: string, round: number) {
   return env.DB.prepare("SELECT status, state_json as stateJson, version FROM tournament_rounds WHERE tournament_id = ? AND round = ?").bind(tournamentId, round).first<{ status: string; stateJson: string; version: number }>();
 }
 
-async function closeExpiredRound(tournamentId: string, round: number, stateJson: string, version: number) {
+async function notifyDeadline(request: Request, tournamentId: string, round: number, deadline: number) {
+  const notice = await getTournamentNotice(tournamentId);
+  if (!notice) return;
+  const remaining = deadline - Date.now();
+  if (remaining <= 30 * 60 * 1000 && remaining > 5 * 60 * 1000) await notifyTournament(request, notice, round, "deadline-30", "30分後に受付を終了し、卓を確定します。参加登録を確認してください。");
+  if (remaining <= 5 * 60 * 1000 && remaining > 0) await notifyTournament(request, notice, round, "deadline-5", "5分後に受付を終了し、卓を確定します。未登録の場合は参加できません。");
+}
+
+async function notifyConfirmed(request: Request, tournamentId: string, round: number, tables: Table[]) {
+  const notice = await getTournamentNotice(tournamentId);
+  if (!notice) return;
+  const tableText = tables.map((table) => `${table.label}: ${table.members.join("・")}（代表者 ${table.representative}）`).join(" / ") || "参加者がいません";
+  await notifyTournament(request, notice, round, "confirmed", `受付終了・卓を確定しました。卓割りを確認し、各卓の代表者はルームIDと結果を登録してください。\n${tableText}`);
+}
+
+async function notifyResultConfirmed(request: Request, tournamentId: string, round: number) {
+  const notice = await getTournamentNotice(tournamentId);
+  if (!notice) return;
+  const final = round === notice.rounds;
+  await notifyTournament(request, notice, round, "result-confirmed", final ? "最終戦の結果が確定しました。最終成績を確認してください。大会終了です。" : "結果が確定しました。成績一覧を確認し、次回戦の参加受付を確認してください。");
+}
+
+async function closeExpiredRound(request: Request, tournamentId: string, round: number, stateJson: string, version: number) {
   const state = parseState(stateJson);
-  if (!state.deadline || state.deadline > Date.now()) return { status: "受付中", ...state, version };
+  if (!state.deadline || state.deadline > Date.now()) { if (state.deadline) await notifyDeadline(request, tournamentId, round, state.deadline); return { status: "受付中", ...state, version }; }
   const entries = await env.DB.prepare("SELECT DISTINCT user_id as userId, nickname FROM tournament_entries WHERE tournament_id = ? AND round = ? AND joined = 1 ORDER BY nickname").bind(tournamentId, round).all<{ userId: string; nickname: string }>();
   const nextState = { tables: buildTables(entries.results) };
   const updated = await env.DB.prepare("UPDATE tournament_rounds SET status = '確定', state_json = ?, version = version + 1, updated_at = CURRENT_TIMESTAMP WHERE tournament_id = ? AND round = ? AND status = '受付中' AND version = ?").bind(JSON.stringify(nextState), tournamentId, round, version).run();
-  if (updated.meta.changes) return { status: "確定", ...nextState, version: version + 1 };
+  if (updated.meta.changes) { await notifyConfirmed(request, tournamentId, round, nextState.tables); return { status: "確定", ...nextState, version: version + 1 }; }
   const current = await findRound(tournamentId, round);
   return current ? { status: current.status, ...parseState(current.stateJson), version: current.version } : { status: "受付中", ...state, version };
 }
@@ -49,7 +72,7 @@ export async function GET(request: Request) {
   const result = await env.DB.prepare("SELECT round, status, state_json as stateJson, version FROM tournament_rounds WHERE tournament_id = ? ORDER BY round").bind(tournamentId).all();
   const rounds = [];
   for (const row of result.results as Array<{ round: number; status: string; stateJson: string; version: number }>) {
-    const state = row.status === "受付中" ? await closeExpiredRound(tournamentId, row.round, row.stateJson, row.version) : { status: row.status, ...parseState(row.stateJson), version: row.version };
+    const state = row.status === "受付中" ? await closeExpiredRound(request, tournamentId, row.round, row.stateJson, row.version) : { status: row.status, ...parseState(row.stateJson), version: row.version };
     rounds.push({ round: row.round, ...state });
   }
   return Response.json(rounds);
@@ -75,6 +98,7 @@ export async function PUT(request: Request) {
   const state = parseState(current.stateJson);
   let status = current.status;
   let nextState = state;
+  let resultJustConfirmed = false;
   if (action === "start") {
     if (!isOrganizer || current.status !== "受付前") return Response.json({ error: "主催者だけが受付を開始できます" }, { status: 403 });
     if (round > 1) {
@@ -112,11 +136,16 @@ export async function PUT(request: Request) {
     } else if (action === "approve") {
       if (current.status !== "確定" || table.resultStatus !== "結果登録済み（承認待ち）" || !(table.memberIds ?? []).includes(profile.sessionId) || !table.scores) return Response.json({ error: "承認待ちの卓の参加者だけが結果を承認できます" }, { status: 403 });
       const approvals = [...new Set([...(table.approvals ?? []), profile.sessionId])];
-      nextState = { ...state, tables: state.tables.map((item, index) => index === tableIndex ? { ...item, approvals, resultStatus: approvals.length >= item.members.length ? "結果確定" : "結果登録済み（承認待ち）" } : item) };
+      const resultStatus = approvals.length >= (table.memberIds?.length ?? table.members.length) ? "結果確定" : "結果登録済み（承認待ち）";
+      nextState = { ...state, tables: state.tables.map((item, index) => index === tableIndex ? { ...item, approvals, resultStatus } : item) };
+      resultJustConfirmed = resultStatus === "結果確定";
     } else return Response.json({ error: "未対応の操作です" }, { status: 400 });
   }
 
   const updated = await env.DB.prepare("UPDATE tournament_rounds SET status = ?, state_json = ?, version = version + 1, updated_at = CURRENT_TIMESTAMP WHERE tournament_id = ? AND round = ? AND version = ?").bind(status, JSON.stringify(nextState), tournamentId, round, expectedVersion).run();
   if (!updated.meta.changes) return Response.json({ error: "他の操作で状態が更新されています" }, { status: 409 });
+  if (action === "confirm") await notifyConfirmed(request, tournamentId, round, nextState.tables);
+  if (action === "start" && nextState.deadline) await notifyDeadline(request, tournamentId, round, nextState.deadline);
+  if (resultJustConfirmed) await notifyResultConfirmed(request, tournamentId, round);
   return Response.json({ ok: true, round, status, ...nextState, version: expectedVersion + 1 });
 }
