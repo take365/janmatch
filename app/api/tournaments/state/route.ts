@@ -89,6 +89,9 @@ export async function PUT(request: Request) {
     const deadline = typeof body.deadline === "number" && body.deadline > Date.now() ? body.deadline : 0;
     if (!deadline) return Response.json({ error: "有効な終了予定時刻が必要です" }, { status: 400 });
     nextState = { ...state, deadline };
+  } else if (action === "cancel_schedule") {
+    if (!isOrganizer || current.status !== "受付中") return Response.json({ error: "受付中の回戦だけ予約を取消できます" }, { status: 403 });
+    nextState = { ...state, deadline: undefined };
   } else {
     const tableIndex = typeof body.tableIndex === "number" ? body.tableIndex : -1;
     const table = state.tables[tableIndex];
