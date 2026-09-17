@@ -23,6 +23,21 @@ npm run dev
 
 ブラウザで <http://localhost:3000> を開きます。
 
+## Discordログイン（Issue #1）
+
+Discord Developer PortalでOAuth2アプリケーションを作成し、Redirect URIに `http://localhost:3000/api/auth/discord/callback` を登録します。Botユーザーの登録はこのログイン機能には不要です。
+
+ローカルでは `.dev.vars` に次の秘密値・設定値を用意します。`DISCORD_CLIENT_SECRET` はリポジトリへ登録しません。
+
+```text
+DISCORD_CLIENT_ID=...
+DISCORD_CLIENT_SECRET=...
+DISCORD_GUILD_ID=対象DiscordサーバーのGuild ID
+APP_ORIGIN=http://localhost:3000
+```
+
+`npm run db:local:migrate` 実行後、`/login` からDiscordログインを開始できます。対象Guildのメンバーであることを確認し、セッション値はハッシュ化してD1へ保存します。
+
 ## 今後の実装
 
 雀魂の対局結果スクリーンショット解析、点数・ウマ計算、Discord進行Bot、公開環境へのD1適用を順に追加します。
