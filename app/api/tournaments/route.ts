@@ -18,9 +18,12 @@ const parseState = (value: unknown): RoundState => {
 export async function GET(request: Request) {
   const db = getDb(); if (!db) return Response.json({ error: "D1 binding is unavailable" }, { status: 503 });
   const id = new URL(request.url).searchParams.get("id");
-  const query = id ? "SELECT id, owner, owner_user_id as ownerUserId, name, game_type as gameType, start_at as startAt, password, rounds, pairing_mode as pairingMode, uma, notice, phase, created_at as createdAt FROM tournaments WHERE id = ?" : "SELECT id, owner, name, game_type as gameType, start_at as startAt, rounds, pairing_mode as pairingMode, uma, notice, phase, created_at as createdAt FROM tournaments ORDER BY start_at ASC";
+  const query = id ? "SELECT id, owner, owner_user_id as ownerUserId, name, game_type as gameType, start_at as startAt, password, rounds, pairing_mode as pairingMode, uma, notice, phase, created_at as createdAt FROM tournaments WHERE id = ?" : "SELECT id, owner, owner_user_id as ownerUserId, name, game_type as gameType, start_at as startAt, rounds, pairing_mode as pairingMode, uma, notice, phase, created_at as createdAt FROM tournaments ORDER BY start_at ASC";
   const result = id ? await db.prepare(query).bind(id).all() : await db.prepare(query).all();
-  if (!id) return Response.json(result.results);
+  if (!id) {
+    const profile = await getProfile(request);
+    return Response.json((result.results as Array<Record<string, unknown>>).map(({ ownerUserId, ...tournament }) => ({ ...tournament, isOrganizer: Boolean(profile && ownerUserId && profile.sessionId === ownerUserId) })));
+  }
   const tournament = result.results[0] as Record<string, unknown> | undefined;
   if (!tournament) return Response.json(null, { status: 404 });
   const profile = await getProfile(request);
