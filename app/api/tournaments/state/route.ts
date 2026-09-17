@@ -41,9 +41,11 @@ export async function GET(request: Request) {
   if (!env.DB) return Response.json({ error: "D1 binding is unavailable" }, { status: 503 });
   const tournamentId = new URL(request.url).searchParams.get("tournamentId");
   if (!tournamentId) return Response.json({ error: "大会IDが必要です" }, { status: 400 });
-  const tournament = await env.DB.prepare("SELECT password FROM tournaments WHERE id = ?").bind(tournamentId).first<{ password: string }>();
+  const tournament = await env.DB.prepare("SELECT password, owner FROM tournaments WHERE id = ?").bind(tournamentId).first<{ password: string; owner: string }>();
   if (!tournament) return Response.json({ error: "大会が見つかりません" }, { status: 404 });
-  if (tournament.password && !hasTournamentAccess(request, tournamentId)) return Response.json({ error: "大会のパスワードが必要です" }, { status: 403 });
+  const profile = await getProfile(request);
+  const isOrganizer = profile?.nickname === tournament.owner;
+  if (tournament.password && !isOrganizer && !hasTournamentAccess(request, tournamentId)) return Response.json({ error: "大会のパスワードが必要です" }, { status: 403 });
   const result = await env.DB.prepare("SELECT round, status, state_json as stateJson, version FROM tournament_rounds WHERE tournament_id = ? ORDER BY round").bind(tournamentId).all();
   const rounds = [];
   for (const row of result.results as Array<{ round: number; status: string; stateJson: string; version: number }>) {
