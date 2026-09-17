@@ -2,10 +2,10 @@
 
 オンライン麻雀大会の運営を支援するシステムです。
 
-現在はローカルMVPとして、次の運営フローを画面上で確認できます。
+現在はローカルMVPとして、Discord OAuth2でログインしたユーザーが次の運営フローを画面上で確認できます。
 
 - 大会名・パスワード・回戦数・制限時間・ルールの設定
-- ニックネームによる参加者受付
+- DiscordユーザーIDに紐づく参加者受付
 - 参加者の参加／受付待ち切り替え
 - 4人卓の仮組みと回戦進行
 - 順位表と点数の仮入力
@@ -37,6 +37,24 @@ APP_ORIGIN=http://localhost:3000
 ```
 
 `npm run db:local:migrate` 実行後、`/login` からDiscordログインを開始できます。対象Guildのメンバーであることを確認し、セッション値はハッシュ化してD1へ保存します。
+
+## ローカルD1の初期化・確認用シード
+
+既存のローカルD1大会データは認証移行時に保持・移行しません。ローカルD1を初期化すると、`.wrangler/state/v3/d1` 配下のこのプロジェクト専用データを削除し、`0002` 以降の現行マイグレーションを最初から適用した後、DiscordユーザーID・`owner_user_id`・`tournament_entries.user_id`・卓の `memberIds` / `representativeUserId` を含む確認用大会を再作成します。実行前に開発サーバーを停止してください。
+
+```bash
+npm run db:local:reset
+```
+
+シード主催者を実際のDiscordユーザーに合わせる場合は、DiscordのユーザーIDを指定して実行します。指定したユーザーが次回OAuthログインすると、シード大会の主催者として管理画面を確認できます。
+
+```powershell
+$env:JANMATCH_SEED_DISCORD_USER_ID="DiscordユーザーID"
+npm run db:local:reset
+Remove-Item Env:JANMATCH_SEED_DISCORD_USER_ID
+```
+
+初期化後の確認手順は、Discordログイン、プロフィール確認、シード大会の管理画面表示、1回戦の参加者確認、代表者としてのルームID・結果登録、参加者としての結果承認です。確認後は `npm run dev` でローカルサーバーを起動します。
 
 ## 今後の実装
 
