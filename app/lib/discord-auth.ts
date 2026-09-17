@@ -21,7 +21,7 @@ export async function getAuthenticatedUser(request: Request) {
   if (!env.DB) return null;
   const token = cookieValue(request, AUTH_COOKIE); if (!token) return null;
   const tokenHash = await hash(token);
-  return env.DB.prepare("SELECT u.id, u.discord_user_id as discordUserId, u.discord_username as discordUsername, u.nickname, u.game_name as gameName FROM auth_sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ? AND s.expires_at > CURRENT_TIMESTAMP").bind(tokenHash).first<{ id: string; discordUserId: string; discordUsername: string; nickname: string; gameName: string }>();
+  return env.DB.prepare("SELECT u.id, u.discord_user_id as discordUserId, u.discord_username as discordUsername, u.discord_nickname as discordNickname, u.nickname, u.game_name as gameName FROM auth_sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ? AND s.expires_at > CURRENT_TIMESTAMP").bind(tokenHash).first<{ id: string; discordUserId: string; discordUsername: string; discordNickname: string; nickname: string; gameName: string }>();
 }
 
 export async function requireConfig() { const value = config(); if (!value.clientId || !value.clientSecret || !value.guildId) throw new Error("Discord OAuth2の環境変数が未設定です"); return value as { clientId: string; clientSecret: string; guildId: string; appOrigin?: string }; }

@@ -8,7 +8,7 @@ export default function ProfilePage() {
   const [gameName, setGameName] = useState("");
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState("");
-  useEffect(() => { fetch("/api/profile").then((response) => response.ok ? response.json() : Promise.reject()).then((profile: { nickname?: string; gameName?: string }) => { setNickname(profile.nickname ?? ""); setGameName(profile.gameName ?? ""); }).catch(() => setError("利用者情報を取得できませんでした。")); }, []);
+  useEffect(() => { Promise.all([fetch("/api/profile"), fetch("/api/auth/me")]).then(async ([profileResponse, authResponse]) => { const profile = profileResponse.ok ? await profileResponse.json() as { nickname?: string; gameName?: string } : {}; const auth = authResponse.ok ? await authResponse.json() as { user?: { discordNickname?: string; discordUsername?: string } } : {}; setNickname(profile.nickname || auth.user?.discordNickname || auth.user?.discordUsername || ""); setGameName(profile.gameName ?? ""); }).catch(() => setError("利用者情報を取得できませんでした。")); }, []);
   const save = async () => {
     const response = await fetch("/api/profile", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ nickname: nickname.trim(), gameName: gameName.trim() }) });
     if (!response.ok) { const payload = await response.json().catch(() => null) as { error?: string } | null; setError(payload?.error ?? "保存に失敗しました"); return; }
