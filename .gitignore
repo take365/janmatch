@@ -3,6 +3,7 @@ node_modules/
 dist/
 .wrangler/
 .next/
+.dev.vars
 *.tar
 *.tar.gz
 *.log
