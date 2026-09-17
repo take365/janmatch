@@ -140,3 +140,5 @@ button { cursor: pointer; }
 .jm-check-label { display: flex !important; align-items: center; gap: 8px; }.jm-check-label input { width: auto !important; margin: 0 !important; }
 .jm-user-shell:has(.jm-results-card) { max-width: 1160px; }.jm-results-scroll { overflow: visible; }@media (max-width: 760px) { .jm-results-card { padding: 12px; } }
 .jm-round-closed, .jm-round-empty { color: #78867d; font-size: 12px; }.jm-own-score-table { overflow: visible; margin-top: 5px; border: 1px solid #dce7de; border-radius: 8px; font-size: 12px; }.jm-own-score-table > div { display: grid; grid-template-columns: 42px minmax(120px, 1fr) 90px 70px; gap: 8px; padding: 7px 9px; border-top: 1px solid #e5ece6; align-items: center; }.jm-own-score-table > div:first-child { border-top: 0; }.jm-own-score-head { color: #78867d; background: #f4f8f4; font-size: 10px; }.jm-pending-result { color: #b27627; }
+.jm-lock-card .jm-primary { display: inline-block; margin-top: 8px; text-decoration: none; }
+.jm-lock-card p { line-height: 1.7; margin: 12px 0; }
