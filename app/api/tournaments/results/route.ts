@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
 import { getProfile, hasTournamentAccess } from "../../../lib/session";
 
-type Table = { label: string; members: string[]; scores?: number[]; resultStatus?: string };
+type Table = { label: string; members: string[]; memberIds?: string[]; scores?: number[]; resultStatus?: string };
 type RoundState = { tables: Table[] };
 
 function parseUma(value: unknown): number[] {
@@ -38,41 +38,43 @@ export async function GET(request: Request) {
   if (!env.DB) return Response.json({ error: "D1 binding is unavailable" }, { status: 503 });
   const tournamentId = new URL(request.url).searchParams.get("tournamentId");
   if (!tournamentId) return Response.json({ error: "大会IDが必要です" }, { status: 400 });
-  const tournament = await env.DB.prepare("SELECT id, name, password, owner, rounds, uma FROM tournaments WHERE id = ?").bind(tournamentId).first<{ id: string; name: string; password: string; owner: string; rounds: number; uma: string }>();
+  const tournament = await env.DB.prepare("SELECT id, name, password, owner, owner_user_id as ownerUserId, rounds, uma FROM tournaments WHERE id = ?").bind(tournamentId).first<{ id: string; name: string; password: string; owner: string; ownerUserId?: string; rounds: number; uma: string }>();
   if (!tournament) return Response.json({ error: "大会が見つかりません" }, { status: 404 });
   const profile = await getProfile(request);
-  const isOrganizer = profile?.nickname === tournament.owner;
+  const isOrganizer = Boolean(profile && profile.sessionId === tournament.ownerUserId);
   if (tournament.password && !isOrganizer && !hasTournamentAccess(request, tournamentId)) return Response.json({ error: "大会のパスワードが必要です" }, { status: 403 });
 
   const [entries, states] = await Promise.all([
-    env.DB.prepare("SELECT nickname, game_name as gameName, round FROM tournament_entries WHERE tournament_id = ? AND joined = 1 ORDER BY round ASC").bind(tournamentId).all<{ nickname: string; gameName: string; round: number }>(),
+    env.DB.prepare("SELECT user_id as userId, nickname, game_name as gameName, round FROM tournament_entries WHERE tournament_id = ? AND joined = 1 ORDER BY round ASC").bind(tournamentId).all<{ userId: string; nickname: string; gameName: string; round: number }>(),
     env.DB.prepare("SELECT round, status, state_json as stateJson FROM tournament_rounds WHERE tournament_id = ? ORDER BY round").bind(tournamentId).all<{ round: number; status: string; stateJson: string }>(),
   ]);
   const gameNames = new Map<string, string>();
-  for (const entry of entries.results) if (!gameNames.get(entry.nickname) && entry.gameName) gameNames.set(entry.nickname, entry.gameName);
-  const participantNames = new Set(entries.results.map((item) => item.nickname));
+  const displayNames = new Map<string, string>();
+  for (const entry of entries.results) { displayNames.set(entry.userId, entry.nickname); if (!gameNames.get(entry.userId) && entry.gameName) gameNames.set(entry.userId, entry.gameName); }
+  const participantNames = new Set(entries.results.map((item) => item.userId));
   const rounds = states.results.map((row) => ({ round: row.round, status: row.status, state: parseState(row.stateJson) }));
-  for (const round of rounds) for (const table of round.state.tables) for (const member of table.members) participantNames.add(member);
+  for (const round of rounds) for (const table of round.state.tables) for (const memberId of table.memberIds ?? []) participantNames.add(memberId);
   const uma = parseUma(tournament.uma);
-  const participants = [...participantNames].map((nickname) => {
+  const participants = [...participantNames].map((userId) => {
     let totalRaw = 0;
     let totalWithUma = 0;
     const roundResults = rounds.map((round) => {
-      const table = round.state.tables.find((item) => item.members.includes(nickname));
+      const memberIndex = round.state.tables.find((item) => (item.memberIds ?? []).includes(userId));
+      const table = memberIndex;
       const result: { table?: string; rank?: number; rawScore?: number; score?: number; confirmed: boolean } = { confirmed: false };
       if (!table) return result;
       result.table = table.label;
       if (table.resultStatus !== "結果確定" || !table.scores || table.scores.length !== table.members.length || table.scores.length !== 4 || table.scores.reduce((sum, value) => sum + Number(value), 0) !== 100000) return result;
       const scores = table.scores.map(Number);
       const { ranks, allocations } = rankUma(scores, uma);
-      const memberIndex = table.members.indexOf(nickname);
-      const rawScore = scores[memberIndex];
-      const score = rawScore / 1000 + allocations[memberIndex];
-      result.rank = ranks[memberIndex]; result.rawScore = rawScore; result.score = score; result.confirmed = true;
+      const scoreIndex = (table.memberIds ?? []).indexOf(userId);
+      const rawScore = scores[scoreIndex];
+      const score = rawScore / 1000 + allocations[scoreIndex];
+      result.rank = ranks[scoreIndex]; result.rawScore = rawScore; result.score = score; result.confirmed = true;
       totalRaw += rawScore; totalWithUma += score;
       return result;
     });
-    return { nickname, gameName: gameNames.get(nickname) ?? "", rounds: roundResults, totalRaw, totalWithUma };
+    return { userId, nickname: displayNames.get(userId) ?? "", gameName: gameNames.get(userId) ?? "", rounds: roundResults, totalRaw, totalWithUma };
   }).sort((a, b) => b.totalWithUma - a.totalWithUma || a.nickname.localeCompare(b.nickname, "ja"));
   let previousTotal: number | undefined;
   let previousRank = 0;
