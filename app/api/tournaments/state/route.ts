@@ -138,7 +138,7 @@ export async function PUT(request: Request) {
       const approvals = [...new Set([...(table.approvals ?? []), profile.sessionId])];
       const resultStatus = approvals.length >= (table.memberIds?.length ?? table.members.length) ? "結果確定" : "結果登録済み（承認待ち）";
       nextState = { ...state, tables: state.tables.map((item, index) => index === tableIndex ? { ...item, approvals, resultStatus } : item) };
-      resultJustConfirmed = resultStatus === "結果確定";
+      resultJustConfirmed = resultStatus === "結果確定" && nextState.tables.length > 0 && nextState.tables.every((item) => item.resultStatus === "結果確定");
     } else return Response.json({ error: "未対応の操作です" }, { status: 400 });
   }
 

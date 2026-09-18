@@ -35,11 +35,14 @@ DISCORD_CLIENT_SECRET=...
 DISCORD_GUILD_ID=対象DiscordサーバーのGuild ID
 APP_ORIGIN=http://localhost:3000
 DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
+DISCORD_CRON_SECRET=ローカル確認用のランダムな秘密値
 ```
 
 `npm run db:local:migrate` 実行後、`/login` からDiscordログインを開始できます。対象Guildのメンバーであることを確認し、セッション値はハッシュ化してD1へ保存します。
 
 大会進行通知を使う場合は、Discordの対象チャンネルでIncoming Webhookを作成し、`DISCORD_WEBHOOK_URL` を `.dev.vars` または本番のシークレットへ設定します。Webhook URLはD1・画面・リポジトリ・通常ログには保存・表示しません。通知送信に失敗しても大会状態の更新は成功し、サーバーログで失敗を確認できます。送信済みイベントはD1で大会・回戦・通知種別ごとに一意管理します。
+
+30分前・5分前通知は、WorkersのCron Trigger（毎分）から `/api/tournaments/notifications` を巡回して発火します。Cron経路は `DISCORD_CRON_SECRET` で保護します。ローカルでは開発サーバー起動後に `npm run notifications:check` を実行して同じ確認経路を手動確認できます。定時巡回は通知だけを行い、大会状態の正本は引き続きD1です。
 
 ## ローカルD1の初期化・確認用シード
 
