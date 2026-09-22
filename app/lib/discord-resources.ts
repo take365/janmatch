@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
 import { getConfig } from "./discord-auth";
 
-type ResourceRow = { tournamentId: string; guildId: string; roleId: string | null; channelId: string | null; announcementChannelId: string | null; announcementMessageId: string | null; provisionStatus: string; lastError: string };
+type ResourceRow = { tournamentId: string; guildId: string; roleId: string | null; channelId: string | null; announcementChannelId: string | null; announcementMessageId: string | null; provisionStatus: string; lastError: string; cleanupAt?: string | null };
 type Tournament = { id: string; name: string; notice: string; startAt: string; rounds: number };
 
 const values = () => env as unknown as Record<string, unknown>;
@@ -17,7 +17,7 @@ async function discordRequest(path: string, init: RequestInit = {}) {
 async function save(db: D1Database, tournamentId: string, patch: Partial<{ roleId: string | null; channelId: string | null; announcementChannelId: string | null; announcementMessageId: string | null; provisionStatus: string; lastError: string; retryAt: string | null }>) {
   const entries = Object.entries(patch);
   if (!entries.length) return;
-  const columns = entries.map(([key]) => ({ roleId: "role_id", channelId: "channel_id", announcementChannelId: "announcement_channel_id", announcementMessageId: "announcement_message_id", provisionStatus: "provision_status", lastError: "last_error", retryAt: "retry_at" } as Record<string, string>)[key]);
+  const columns = entries.map(([key]) => ({ roleId: "role_id", channelId: "channel_id", announcementChannelId: "announcement_channel_id", announcementMessageId: "announcement_message_id", provisionStatus: "provision_status", lastError: "last_error", retryAt: "retry_at", cleanupAt: "cleanup_at" } as Record<string, string>)[key]);
   await db.prepare(`UPDATE tournament_discord_resources SET ${columns.map((column) => `${column} = ?`).join(", ")}, updated_at = CURRENT_TIMESTAMP WHERE tournament_id = ?`).bind(...entries.map(([, value]) => value), tournamentId).run();
 }
 
@@ -28,7 +28,7 @@ export async function provisionTournamentResources(tournamentId: string) {
   const tournament = await env.DB.prepare("SELECT id, name, notice, start_at as startAt, rounds FROM tournaments WHERE id = ?").bind(tournamentId).first<Tournament>();
   if (!tournament) throw new Error("大会が見つかりません");
   await env.DB.prepare("INSERT OR IGNORE INTO tournament_discord_resources (tournament_id, guild_id, announcement_channel_id, provision_status) VALUES (?, ?, ?, 'draft')").bind(tournamentId, config.guildId, config.announcementChannelId).run();
-  let row = await env.DB.prepare("SELECT tournament_id as tournamentId, guild_id as guildId, role_id as roleId, channel_id as channelId, announcement_channel_id as announcementChannelId, announcement_message_id as announcementMessageId, provision_status as provisionStatus, last_error as lastError FROM tournament_discord_resources WHERE tournament_id = ?").bind(tournamentId).first<ResourceRow>();
+  let row = await env.DB.prepare("SELECT tournament_id as tournamentId, guild_id as guildId, role_id as roleId, channel_id as channelId, announcement_channel_id as announcementChannelId, announcement_message_id as announcementMessageId, provision_status as provisionStatus, last_error as lastError, cleanup_at as cleanupAt FROM tournament_discord_resources WHERE tournament_id = ?").bind(tournamentId).first<ResourceRow>();
   if (!row) throw new Error("大会Discord資源台帳を作成できませんでした");
   await save(env.DB, tournamentId, { provisionStatus: "provisioning", lastError: "", retryAt: null });
   try {
@@ -52,13 +52,43 @@ export async function provisionTournamentResources(tournamentId: string) {
       if (!row.announcementMessageId) throw new Error("大会告知メッセージIDを取得できませんでした");
       await save(env.DB, tournamentId, { announcementMessageId: row.announcementMessageId });
     }
-    await save(env.DB, tournamentId, { provisionStatus: "published" });
+    const cleanupAt = new Date(new Date(tournament.startAt).getTime() + 7 * 24 * 60 * 60 * 1000).toISOString();
+    await save(env.DB, tournamentId, { provisionStatus: "published", cleanupAt });
     return { tournamentId, roleId: row.roleId, channelId: row.channelId, announcementChannelId: row.announcementChannelId ?? config.announcementChannelId, announcementMessageId: row.announcementMessageId, status: "published" };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Discord資源作成に失敗しました";
     await save(env.DB, tournamentId, { provisionStatus: "failed", lastError: message, retryAt: new Date(Date.now() + 60_000).toISOString() });
     throw new Error(message);
   }
+}
+
+export async function runDiscordResourceLifecycle() {
+  if (!env.DB) return { provisioned: 0, cleaned: 0, retried: 0 };
+  const now = Date.now();
+  const due = await env.DB.prepare("SELECT id, start_at as startAt FROM tournaments WHERE phase = 'before'").all<{ id: string; startAt: string }>();
+  let provisioned = 0;
+  const retries = await env.DB.prepare("SELECT tournament_id as tournamentId, user_id as userId, desired_state as desiredState FROM tournament_role_sync WHERE status = 'failed' AND (retry_at IS NULL OR julianday(retry_at) <= julianday('now')) LIMIT 50").all<{ tournamentId: string; userId: string; desiredState: string }>();
+  let retried = 0;
+  for (const item of retries.results) { await syncTournamentRole(item.tournamentId, item.userId, item.desiredState === "joined"); retried += 1; }
+  for (const tournament of due.results) {
+    const start = Date.parse(tournament.startAt);
+    if (Number.isFinite(start) && start > now && start - now <= 3 * 60 * 60 * 1000) {
+      try { await provisionTournamentResources(tournament.id); provisioned += 1; } catch (error) { console.warn(`Discord資源の事前作成に失敗: ${tournament.id}`, error); }
+    }
+  }
+  const cleanup = await env.DB.prepare("SELECT tournament_id as tournamentId, role_id as roleId, channel_id as channelId, guild_id as guildId FROM tournament_discord_resources WHERE provision_status = 'published' AND cleanup_at IS NOT NULL AND julianday(cleanup_at) <= julianday('now')").all<{ tournamentId: string; roleId: string | null; channelId: string | null; guildId: string }>();
+  let cleaned = 0;
+  for (const resource of cleanup.results) {
+    try {
+      if (resource.channelId) await discordRequest(`/channels/${resource.channelId}`, { method: "DELETE" });
+      if (resource.roleId) await discordRequest(`/guilds/${resource.guildId}/roles/${resource.roleId}`, { method: "DELETE" });
+      await env.DB.prepare("UPDATE tournament_discord_resources SET provision_status = 'cleaned', updated_at = CURRENT_TIMESTAMP WHERE tournament_id = ?").bind(resource.tournamentId).run();
+      cleaned += 1;
+    } catch (error) {
+      await env.DB.prepare("UPDATE tournament_discord_resources SET provision_status = 'failed', last_error = ?, retry_at = ?, updated_at = CURRENT_TIMESTAMP WHERE tournament_id = ?").bind(error instanceof Error ? error.message : "Discord資源の削除に失敗しました", new Date(Date.now() + 60_000).toISOString(), resource.tournamentId).run();
+    }
+  }
+  return { provisioned, cleaned, retried };
 }
 
 export async function syncTournamentRole(tournamentId: string, userId: string, joined: boolean) {

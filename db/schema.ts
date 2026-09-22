@@ -81,6 +81,7 @@ export const tournamentDiscordResources = sqliteTable("tournament_discord_resour
   provisionStatus: text("provision_status").notNull().default("draft"),
   lastError: text("last_error").notNull().default(""),
   retryAt: text("retry_at"),
+  cleanupAt: text("cleanup_at"),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
