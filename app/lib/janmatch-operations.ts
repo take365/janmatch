@@ -4,6 +4,7 @@ import { POST as postEntry } from "../api/tournaments/entries/route";
 import { POST as postTournament } from "../api/tournaments/route";
 import { beginOperation, finishOperation, requestConfirmation } from "./operation-audit";
 import { getConfig } from "./discord-auth";
+import { provisionTournamentResources, syncTournamentRole } from "./discord-resources";
 
 export type JanmatchActor = { discordUserId: string; guildId?: string; channelId?: string; interactionId?: string; roles?: string[] };
 export type OperationArgs = { tournamentId?: string; round?: number; tableIndex?: number; expectedVersion?: number; joined?: boolean; roomId?: string; scores?: number[]; deadline?: number; name?: string; gameType?: string; startAt?: string; rounds?: number; pairingMode?: string; uma?: number[]; password?: string; notice?: string; confirmed?: boolean };
@@ -30,10 +31,10 @@ export async function executeJanmatchOperation(actor: JanmatchActor, operation: 
   const auditId = audit.id;
   if (audit.duplicate) return { ok: audit.status === "completed", data: audit.afterSummary || audit.errorMessage };
   try {
-    const operatorOnly = new Set(["create_tournament", "start", "confirm", "schedule_round", "cancel_schedule"]);
+    const operatorOnly = new Set(["create_tournament", "start", "confirm", "schedule_round", "cancel_schedule", "provision_tournament_resources"]);
     const operatorRoleId = getConfig().operatorRoleId;
     if (operatorOnly.has(operation) && (!operatorRoleId || !actor.roles?.includes(operatorRoleId))) throw new Error("運営ロールが未設定、または付与されていないため操作できません");
-    const writeOperation = new Set(["join_round", "cancel_round", "join_tournament", "cancel_tournament", "create_tournament", "start", "confirm", "set_room_id", "set_scores", "approve_result", "schedule_round", "cancel_schedule"]);
+    const writeOperation = new Set(["join_round", "cancel_round", "join_tournament", "cancel_tournament", "create_tournament", "start", "confirm", "set_room_id", "set_scores", "approve_result", "schedule_round", "cancel_schedule", "provision_tournament_resources"]);
     if (writeOperation.has(operation) && !args.confirmed) {
       const token = crypto.randomUUID();
       await requestConfirmation(auditId, token, new Date(Date.now() + 5 * 60_000).toISOString());
@@ -44,6 +45,16 @@ export async function executeJanmatchOperation(actor: JanmatchActor, operation: 
       await notifyOperator(actor, operation, args);
       await finishOperation(auditId, "completed", JSON.stringify({ operation, notified: Boolean(getConfig().operatorChannelId) }));
       return { ok: true, data: { message: getConfig().operatorChannelId ? "運営へ申告を転送しました。" : "申告を監査ログへ記録しました。運営通知先は未設定です。" } };
+    }
+    if (operation === "get_discord_resources") {
+      if (!args.tournamentId) throw new Error("大会IDが必要です");
+      const resource = await env.DB.prepare("SELECT tournament_id as tournamentId, guild_id as guildId, role_id as roleId, channel_id as channelId, announcement_channel_id as announcementChannelId, announcement_message_id as announcementMessageId, provision_status as provisionStatus, last_error as lastError FROM tournament_discord_resources WHERE tournament_id = ?").bind(args.tournamentId).first();
+      await finishOperation(auditId, "completed", JSON.stringify({ tournamentId: args.tournamentId, found: Boolean(resource) })); return { ok: true, data: resource ?? { status: "未作成" } };
+    }
+    if (operation === "provision_tournament_resources") {
+      if (!args.tournamentId) throw new Error("大会IDが必要です");
+      const resource = await provisionTournamentResources(args.tournamentId);
+      await finishOperation(auditId, "completed", JSON.stringify(resource)); return { ok: true, data: resource };
     }
     let response: Response;
     if (operation === "list_tournaments") {
@@ -66,8 +77,9 @@ export async function executeJanmatchOperation(actor: JanmatchActor, operation: 
       } else {
         await env.DB.prepare("UPDATE tournament_entries SET joined = 0 WHERE tournament_id = ? AND user_id = ? AND round IN (SELECT round FROM tournament_rounds WHERE tournament_id = ? AND status = '受付中')").bind(args.tournamentId, actor.discordUserId, args.tournamentId).run();
       }
+      const roleSync = await syncTournamentRole(args.tournamentId, actor.discordUserId, operation === "join_tournament");
       await finishOperation(auditId, "completed", JSON.stringify({ operation, rounds: rounds.results.map((item) => item.round) }));
-      return { ok: true, data: { message: `${rounds.results.length}回戦を対象に大会全体の${operation === "join_tournament" ? "参加申請" : "参加取消"}を行いました。`, rounds: rounds.results.map((item) => item.round) } };
+      return { ok: true, data: { message: `${rounds.results.length}回戦を対象に大会全体の${operation === "join_tournament" ? "参加申請" : "参加取消"}を行いました。`, rounds: rounds.results.map((item) => item.round), roleSync } };
     } else if (operation === "join_round" || operation === "cancel_round") {
       if (!args.tournamentId || !Number.isInteger(args.round)) throw new Error("大会IDと回戦が必要です");
       response = await postEntry(jsonRequest("http://internal/api/tournaments/entries", "POST", actor, { tournamentId: args.tournamentId, round: args.round, joined: operation === "join_round" }));
@@ -83,7 +95,8 @@ export async function executeJanmatchOperation(actor: JanmatchActor, operation: 
       response = await putState(jsonRequest("http://internal/api/tournaments/state", "PUT", actor, body));
     }
     const result = await readJson(response); if (!response.ok) throw new Error(typeof result.error === "string" ? result.error : "JanMatch操作に失敗しました");
-    await finishOperation(auditId, "completed", JSON.stringify({ operation })); return { ok: true, data: result };
+    const roleSync = operation === "join_round" || operation === "cancel_round" ? await syncTournamentRole(args.tournamentId as string, actor.discordUserId, operation === "join_round") : undefined;
+    await finishOperation(auditId, "completed", JSON.stringify({ operation, roleSync })); return { ok: true, data: { ...result, roleSync } };
   } catch (error) {
     const message = error instanceof Error ? error.message : "操作に失敗しました"; await finishOperation(auditId, "failed", "", message); throw new Error(message);
   }
@@ -92,7 +105,7 @@ export async function executeJanmatchOperation(actor: JanmatchActor, operation: 
 export async function executePendingJanmatchOperation(actor: JanmatchActor, token: string) {
   const row = await env.DB.prepare("SELECT id, actor_discord_user_id as actorDiscordUserId, guild_id as guildId, channel_id as channelId, operation_type as operationType, arguments_json as argumentsJson, actor_roles_json as actorRolesJson, confirmation_expires_at as expiresAt, status FROM operation_requests WHERE confirmation_token = ?").bind(token).first<{ id: string; actorDiscordUserId: string; guildId: string; channelId: string; operationType: string; argumentsJson: string; actorRolesJson: string; expiresAt: string; status: string }>();
   if (!row || row.status !== "pending_confirmation" || row.actorDiscordUserId !== actor.discordUserId || (row.expiresAt && Date.parse(row.expiresAt) < Date.now())) throw new Error("確認操作が無効、または期限切れです");
-  const operatorOnly = new Set(["create_tournament", "start", "confirm", "schedule_round", "cancel_schedule"]);
+  const operatorOnly = new Set(["create_tournament", "start", "confirm", "schedule_round", "cancel_schedule", "provision_tournament_resources"]);
   const operatorRoleId = getConfig().operatorRoleId;
   if (operatorOnly.has(row.operationType) && (!operatorRoleId || !actor.roles?.includes(operatorRoleId))) throw new Error("確認時点で運営ロールが必要です");
   const args = JSON.parse(row.argumentsJson || "{}") as OperationArgs;

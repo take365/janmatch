@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { integer, primaryKey, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
 export const events = sqliteTable("events", {
   id: text("id").primaryKey(),
@@ -69,3 +69,28 @@ export const operationRequests = sqliteTable("operation_requests", {
 export const agentMessages = sqliteTable("agent_messages", {
   id: text("id").primaryKey(), tournamentId: text("tournament_id"), channelId: text("channel_id").notNull(), discordUserId: text("discord_user_id").notNull(), role: text("role").notNull(), content: text("content").notNull(), interactionId: text("interaction_id"), createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
+
+export const tournamentDiscordResources = sqliteTable("tournament_discord_resources", {
+  tournamentId: text("tournament_id").primaryKey(),
+  guildId: text("guild_id").notNull(),
+  roleId: text("role_id"),
+  channelId: text("channel_id"),
+  announcementChannelId: text("announcement_channel_id"),
+  announcementMessageId: text("announcement_message_id"),
+  scheduledEventId: text("scheduled_event_id"),
+  provisionStatus: text("provision_status").notNull().default("draft"),
+  lastError: text("last_error").notNull().default(""),
+  retryAt: text("retry_at"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const tournamentRoleSync = sqliteTable("tournament_role_sync", {
+  tournamentId: text("tournament_id").notNull(),
+  userId: text("user_id").notNull(),
+  desiredState: text("desired_state").notNull(),
+  status: text("status").notNull().default("pending"),
+  lastError: text("last_error").notNull().default(""),
+  retryAt: text("retry_at"),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => ({ primaryKey: primaryKey({ columns: [table.tournamentId, table.userId] }) }));

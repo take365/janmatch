@@ -2,17 +2,25 @@ import { env } from "cloudflare:workers";
 
 export const AUTH_COOKIE = "janmatch_auth";
 export const OAUTH_STATE_COOKIE = "janmatch_oauth_state";
-type Config = { clientId?: string; clientSecret?: string; guildId?: string; appOrigin?: string; applicationId?: string; publicKey?: string; botToken?: string; operatorRoleId?: string; operatorChannelId?: string; allowedChannelIds?: string[]; agentEnabled: boolean; agentModel: string };
+type Config = { clientId?: string; clientSecret?: string; guildId?: string; appOrigin?: string; applicationId?: string; publicKey?: string; botToken?: string; operatorRoleId?: string; operatorChannelId?: string; announcementChannelId?: string; allowedChannelIds?: string[]; agentEnabled: boolean; agentModel: string };
 
 function config(): Config {
   const values = env as unknown as Record<string, unknown>;
   const allowedChannelIds = typeof values.DISCORD_ALLOWED_CHANNEL_IDS === "string" ? values.DISCORD_ALLOWED_CHANNEL_IDS.split(",").map((value) => value.trim()).filter(Boolean) : [];
-  return { clientId: typeof values.DISCORD_CLIENT_ID === "string" ? values.DISCORD_CLIENT_ID : undefined, clientSecret: typeof values.DISCORD_CLIENT_SECRET === "string" ? values.DISCORD_CLIENT_SECRET : undefined, guildId: typeof values.DISCORD_GUILD_ID === "string" ? values.DISCORD_GUILD_ID : undefined, appOrigin: typeof values.APP_ORIGIN === "string" ? values.APP_ORIGIN : undefined, applicationId: typeof values.DISCORD_APPLICATION_ID === "string" ? values.DISCORD_APPLICATION_ID : typeof values.DISCORD_CLIENT_ID === "string" ? values.DISCORD_CLIENT_ID : undefined, publicKey: typeof values.DISCORD_PUBLIC_KEY === "string" ? values.DISCORD_PUBLIC_KEY : undefined, botToken: typeof values.DISCORD_BOT_TOKEN === "string" ? values.DISCORD_BOT_TOKEN : undefined, operatorRoleId: typeof values.DISCORD_OPERATOR_ROLE_ID === "string" ? values.DISCORD_OPERATOR_ROLE_ID : undefined, operatorChannelId: typeof values.DISCORD_OPERATOR_CHANNEL_ID === "string" ? values.DISCORD_OPERATOR_CHANNEL_ID : undefined, allowedChannelIds, agentEnabled: values.DISCORD_AGENT_ENABLED !== "false", agentModel: typeof values.DISCORD_AGENT_MODEL === "string" && values.DISCORD_AGENT_MODEL.trim() ? values.DISCORD_AGENT_MODEL : "gpt-5.6-luna" };
+  return { clientId: typeof values.DISCORD_CLIENT_ID === "string" ? values.DISCORD_CLIENT_ID : undefined, clientSecret: typeof values.DISCORD_CLIENT_SECRET === "string" ? values.DISCORD_CLIENT_SECRET : undefined, guildId: typeof values.DISCORD_GUILD_ID === "string" ? values.DISCORD_GUILD_ID : undefined, appOrigin: typeof values.APP_ORIGIN === "string" ? values.APP_ORIGIN : undefined, applicationId: typeof values.DISCORD_APPLICATION_ID === "string" ? values.DISCORD_APPLICATION_ID : typeof values.DISCORD_CLIENT_ID === "string" ? values.DISCORD_CLIENT_ID : undefined, publicKey: typeof values.DISCORD_PUBLIC_KEY === "string" ? values.DISCORD_PUBLIC_KEY : undefined, botToken: typeof values.DISCORD_BOT_TOKEN === "string" ? values.DISCORD_BOT_TOKEN : undefined, operatorRoleId: typeof values.DISCORD_OPERATOR_ROLE_ID === "string" ? values.DISCORD_OPERATOR_ROLE_ID : undefined, operatorChannelId: typeof values.DISCORD_OPERATOR_CHANNEL_ID === "string" ? values.DISCORD_OPERATOR_CHANNEL_ID : undefined, announcementChannelId: typeof values.DISCORD_ANNOUNCEMENT_CHANNEL_ID === "string" ? values.DISCORD_ANNOUNCEMENT_CHANNEL_ID : allowedChannelIds?.[0], allowedChannelIds, agentEnabled: values.DISCORD_AGENT_ENABLED !== "false", agentModel: typeof values.DISCORD_AGENT_MODEL === "string" && values.DISCORD_AGENT_MODEL.trim() ? values.DISCORD_AGENT_MODEL : "gpt-5.6-luna" };
 }
 
 export function redirectUri(request: Request) { return `${config().appOrigin || new URL(request.url).origin}/api/auth/discord/callback`; }
 export function discordConfigured() { const value = config(); return Boolean(value.clientId && value.clientSecret && value.guildId); }
 export function getConfig() { return config(); }
+
+export async function ensureDiscordUser(user: { id: string; username?: string; global_name?: string }) {
+  if (!env.DB) throw new Error("D1 binding is unavailable");
+  const username = user.username ?? "";
+  const discordNickname = user.global_name ?? username;
+  const nickname = discordNickname || user.id;
+  await env.DB.prepare("INSERT INTO users (id, discord_user_id, discord_username, discord_nickname, nickname, game_name) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET discord_username = excluded.discord_username, discord_nickname = excluded.discord_nickname, updated_at = CURRENT_TIMESTAMP").bind(user.id, user.id, username, discordNickname, nickname, nickname).run();
+}
 
 export function isInternalInteraction(request: Request) {
   const values = env as unknown as Record<string, unknown>;
