@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers";
 import { getProfile, hasTournamentAccess } from "../../../lib/session";
 import { isInternalInteraction } from "../../../lib/discord-auth";
 import { getTournamentNotice, notifyTournament } from "../../../lib/discord-webhook";
+import { scheduleTournamentCleanup } from "../../../lib/discord-resources";
 
 type Table = { label: string; members: string[]; memberIds?: string[]; representative: string; representativeUserId?: string; roomId?: string; scores?: number[]; approvals?: string[]; resultStatus?: string };
 type RoundState = { tables: Table[]; deadline?: number };
@@ -148,5 +149,6 @@ export async function PUT(request: Request) {
   if (action === "confirm") await notifyConfirmed(request, tournamentId, round, nextState.tables);
   if (action === "start" && nextState.deadline) await notifyDeadline(request, tournamentId, round, nextState.deadline);
   if (resultJustConfirmed) await notifyResultConfirmed(request, tournamentId, round);
+  if (resultJustConfirmed) await scheduleTournamentCleanup(tournamentId);
   return Response.json({ ok: true, round, status, ...nextState, version: expectedVersion + 1 });
 }

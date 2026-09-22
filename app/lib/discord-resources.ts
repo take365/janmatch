@@ -55,14 +55,22 @@ export async function provisionTournamentResources(tournamentId: string) {
       if (!row.announcementMessageId) throw new Error("大会告知メッセージIDを取得できませんでした");
       await save(env.DB, tournamentId, { announcementMessageId: row.announcementMessageId });
     }
-    const cleanupAt = new Date(new Date(tournament.startAt).getTime() + 7 * 24 * 60 * 60 * 1000).toISOString();
-    await save(env.DB, tournamentId, { provisionStatus: "published", cleanupAt });
+    await save(env.DB, tournamentId, { provisionStatus: "published", cleanupAt: null });
     return { tournamentId, roleId: row.roleId, channelId: row.channelId, announcementChannelId: row.announcementChannelId ?? config.announcementChannelId, announcementMessageId: row.announcementMessageId, status: "published" };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Discord資源作成に失敗しました";
     await save(env.DB, tournamentId, { provisionStatus: "failed", lastError: message, retryAt: new Date(Date.now() + 60_000).toISOString() });
     throw new Error(message);
   }
+}
+
+export async function scheduleTournamentCleanup(tournamentId: string) {
+  if (!env.DB) return false;
+  const rounds = await env.DB.prepare("SELECT state_json as stateJson FROM tournament_rounds WHERE tournament_id = ?").bind(tournamentId).all<{ stateJson: string }>();
+  const ended = rounds.results.length > 0 && rounds.results.every((item) => { try { const state = JSON.parse(item.stateJson) as { tables?: Array<{ resultStatus?: string }> }; return Array.isArray(state.tables) && state.tables.length > 0 && state.tables.every((table) => table.resultStatus === "結果確定"); } catch { return false; } });
+  if (!ended) return false;
+  await env.DB.prepare("UPDATE tournament_discord_resources SET cleanup_at = datetime('now', '+7 days'), updated_at = CURRENT_TIMESTAMP WHERE tournament_id = ? AND provision_status IN ('published', 'failed')").bind(tournamentId).run();
+  return true;
 }
 
 export async function runDiscordResourceLifecycle() {
@@ -73,6 +81,8 @@ export async function runDiscordResourceLifecycle() {
   const retries = await env.DB.prepare("SELECT tournament_id as tournamentId, user_id as userId, desired_state as desiredState FROM tournament_role_sync WHERE status = 'failed' AND (retry_at IS NULL OR julianday(retry_at) <= julianday('now')) LIMIT 50").all<{ tournamentId: string; userId: string; desiredState: string }>();
   let retried = 0;
   for (const item of retries.results) { await syncTournamentRole(item.tournamentId, item.userId, item.desiredState === "joined"); retried += 1; }
+  const failedProvisioning = await env.DB.prepare("SELECT tournament_id as tournamentId FROM tournament_discord_resources WHERE provision_status = 'failed' AND cleanup_at IS NULL AND (retry_at IS NULL OR julianday(retry_at) <= julianday('now')) LIMIT 20").all<{ tournamentId: string }>();
+  for (const item of failedProvisioning.results) { try { await provisionTournamentResources(item.tournamentId); } catch { /* next cron retries after the stored 60 second backoff */ } retried += 1; }
   for (const tournament of due.results) {
     const start = Date.parse(tournament.startAt);
     if (Number.isFinite(start) && start > now && start - now <= 3 * 60 * 60 * 1000) {

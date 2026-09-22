@@ -58,7 +58,7 @@ Interactionは `DISCORD_ALLOWED_CHANNEL_IDS` が未設定の場合は拒否し�
 
 参加者向けのDiscord操作は、対象チャンネルで `/janmatch` に `参加メニュー` と入力すると表示されるボタンから利用できます。大会全体の参加申請・取消は「受付中の全回戦」を対象にし、回戦単位の参加登録・取消とは別に表示します。ルームID・結果の申告、結果承認、編集申告、運営への問い合わせはモーダルで入力します。編集申告と問い合わせは `DISCORD_OPERATOR_CHANNEL_ID` が設定されていれば運営チャンネルへ転送し、未設定でもD1監査ログへ記録します。通常メンションはGateway常駐処理を必要とするため、現時点では対応していません。
 
-運営は `/janmatch` に `運営メニュー` と入力すると、大会作成、回戦操作、大会ロール・専用チャンネル・告知メッセージ作成の導線を表示できます。Discord資源のIDと状態はD1の `tournament_discord_resources` に保存し、途中失敗は `failed` として再実行可能です。ロール同期の失敗は `tournament_role_sync` に保存し、定時巡回で再試行します。
+運営は `/janmatch` に `運営メニュー` と入力すると、大会作成、回戦操作、大会ロール・専用チャンネル・告知メッセージ作成の導線を表示できます。Discord資源のIDと状態はD1の `tournament_discord_resources` に保存し、途中失敗は `failed` として約60秒後から定時巡回で再実行します。ロール同期の失敗は `tournament_role_sync` に保存し、定時巡回で再試行します。大会資源の削除予定は全回戦・全卓の結果確定後に大会終了時点から7日後として設定します。
 
 30分前・5分前通知は、WorkersのCron Trigger（毎分）から `/api/tournaments/notifications` を巡回して発火します。Cron経路は `DISCORD_CRON_SECRET` で保護します。ローカルでは開発サーバー起動後に `npm run notifications:check` を実行して同じ確認経路を手動確認できます。定時巡回は通知だけを行い、大会状態の正本は引き続きD1です。
 

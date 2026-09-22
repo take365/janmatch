@@ -95,6 +95,7 @@ export async function executeJanmatchOperation(actor: JanmatchActor, operation: 
       response = await putState(jsonRequest("http://internal/api/tournaments/state", "PUT", actor, body));
     }
     const result = await readJson(response); if (!response.ok) throw new Error(typeof result.error === "string" ? result.error : "JanMatch操作に失敗しました");
+    if (operation === "create_tournament" && actor.channelId) await env.DB.prepare("UPDATE discord_tournament_drafts SET status = 'completed', updated_at = CURRENT_TIMESTAMP WHERE channel_id = ? AND discord_user_id = ? AND status = 'draft'").bind(actor.channelId, actor.discordUserId).run();
     const roleSync = operation === "join_round" || operation === "cancel_round" ? await syncTournamentRole(args.tournamentId as string, actor.discordUserId, operation === "join_round") : undefined;
     await finishOperation(auditId, "completed", JSON.stringify({ operation, roleSync })); return { ok: true, data: { ...result, roleSync } };
   } catch (error) {
