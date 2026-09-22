@@ -95,3 +95,14 @@ export const tournamentRoleSync = sqliteTable("tournament_role_sync", {
   retryAt: text("retry_at"),
   updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 }, (table) => ({ primaryKey: primaryKey({ columns: [table.tournamentId, table.userId] }) }));
+
+export const discordTournamentDrafts = sqliteTable("discord_tournament_drafts", {
+  id: text("id").primaryKey(),
+  guildId: text("guild_id"),
+  channelId: text("channel_id").notNull(),
+  discordUserId: text("discord_user_id").notNull(),
+  dataJson: text("data_json").notNull(),
+  status: text("status").notNull().default("draft"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
