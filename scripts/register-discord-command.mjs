@@ -1,3 +1,12 @@
+import { existsSync, readFileSync } from "node:fs";
+
+if (existsSync(".dev.vars")) {
+  for (const line of readFileSync(".dev.vars", "utf8").split(/\r?\n/)) {
+    const match = line.match(/^([A-Z0-9_]+)=(.*)$/);
+    if (match && process.env[match[1]] === undefined) process.env[match[1]] = match[2];
+  }
+}
+
 const applicationId = process.env.DISCORD_APPLICATION_ID || process.env.DISCORD_CLIENT_ID;
 const guildId = process.env.DISCORD_GUILD_ID;
 const botToken = process.env.DISCORD_BOT_TOKEN;
