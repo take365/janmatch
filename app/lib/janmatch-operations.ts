@@ -65,7 +65,12 @@ export async function executeJanmatchOperation(actor: JanmatchActor, operation: 
 export async function executePendingJanmatchOperation(actor: JanmatchActor, token: string) {
   const row = await env.DB.prepare("SELECT id, actor_discord_user_id as actorDiscordUserId, guild_id as guildId, channel_id as channelId, operation_type as operationType, arguments_json as argumentsJson, actor_roles_json as actorRolesJson, confirmation_expires_at as expiresAt, status FROM operation_requests WHERE confirmation_token = ?").bind(token).first<{ id: string; actorDiscordUserId: string; guildId: string; channelId: string; operationType: string; argumentsJson: string; actorRolesJson: string; expiresAt: string; status: string }>();
   if (!row || row.status !== "pending_confirmation" || row.actorDiscordUserId !== actor.discordUserId || (row.expiresAt && Date.parse(row.expiresAt) < Date.now())) throw new Error("確認操作が無効、または期限切れです");
+  const operatorOnly = new Set(["create_tournament", "start", "confirm", "schedule_round", "cancel_schedule"]);
+  const operatorRoleId = getConfig().operatorRoleId;
+  if (operatorOnly.has(row.operationType) && (!operatorRoleId || !actor.roles?.includes(operatorRoleId))) throw new Error("確認時点で運営ロールが必要です");
   const args = JSON.parse(row.argumentsJson || "{}") as OperationArgs;
-  const result = await executeJanmatchOperation({ ...actor, guildId: row.guildId, channelId: row.channelId, roles: JSON.parse(row.actorRolesJson || "[]") as string[] }, row.operationType, { ...args, confirmed: true }, row.id);
+  const claim = await env.DB.prepare("UPDATE operation_requests SET status = 'executing' WHERE id = ? AND actor_discord_user_id = ? AND status = 'pending_confirmation' AND (confirmation_expires_at IS NULL OR confirmation_expires_at > CURRENT_TIMESTAMP)").bind(row.id, actor.discordUserId).run();
+  if (!claim.meta.changes) throw new Error("この確認操作はすでに実行中、または完了しています");
+  const result = await executeJanmatchOperation({ ...actor, guildId: row.guildId, channelId: row.channelId, roles: actor.roles }, row.operationType, { ...args, confirmed: true }, row.id);
   return result;
 }
