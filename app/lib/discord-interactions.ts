@@ -34,8 +34,10 @@ export function interactionUser(interaction: DiscordInteraction) { return intera
 
 export function interactionAllowed(interaction: DiscordInteraction): { ok: true } | { ok: false; reason: string } {
   const config = getConfig();
+  if (!config.agentEnabled) return { ok: false, reason: "運営アシスタントAIは緊急停止中です" };
+  if (!config.guildId || !config.allowedChannelIds?.length) return { ok: false, reason: "Discordの利用Guild・チャンネルが未設定です" };
   if (config.guildId && interaction.guild_id !== config.guildId) return { ok: false, reason: "対象Guild以外からは利用できません" };
-  if (config.allowedChannelIds?.length && interaction.channel_id && !config.allowedChannelIds.includes(interaction.channel_id)) return { ok: false, reason: "このチャンネルでは利用できません" };
+  if (!interaction.channel_id || !config.allowedChannelIds.includes(interaction.channel_id)) return { ok: false, reason: "このチャンネルでは利用できません" };
   return { ok: true };
 }
 

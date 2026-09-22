@@ -42,6 +42,8 @@ DISCORD_BOT_TOKEN=Botトークン
 DISCORD_INTERNAL_SECRET=Discord InteractionからJanMatch専用ツールへ渡す内部共有シークレット
 DISCORD_OPERATOR_ROLE_ID=運営ロールのID
 DISCORD_ALLOWED_CHANNEL_IDS=利用を許可するChannel IDをカンマ区切り
+DISCORD_AGENT_MODEL=gpt-5.6-luna（省略可）
+DISCORD_AGENT_ENABLED=true（falseで緊急停止）
 ```
 
 `npm run db:local:migrate` 実行後、`/login` からDiscordログインを開始できます。対象Guildのメンバーであることを確認し、セッション値はハッシュ化してD1へ保存します。
@@ -49,6 +51,8 @@ DISCORD_ALLOWED_CHANNEL_IDS=利用を許可するChannel IDをカンマ区切り
 大会進行通知を使う場合は、Discordの対象チャンネルでIncoming Webhookを作成し、`DISCORD_WEBHOOK_URL` を `.dev.vars` または本番のシークレットへ設定します。Webhook URLはD1・画面・リポジトリ・通常ログには保存・表示しません。通知送信に失敗しても大会状態の更新は成功し、サーバーログで失敗を確認できます。送信済みイベントはD1で大会・回戦・通知種別ごとに一意管理します。
 
 Discord操作基盤を使う場合は、同じApplicationのSpidey Botを再利用し、Botトークン・公開キー・Guild ID・許可チャンネル・運営ロールを設定します。Guildコマンドは `npm run discord:register` で開発Guildへ登録します。Interactionは署名検証後にJanMatch専用ツールを実行し、操作要求と結果をD1へ監査記録します。
+
+Interactionは `DISCORD_ALLOWED_CHANNEL_IDS` が未設定の場合は拒否します。大会操作など運営ロールが必要な操作は `DISCORD_OPERATOR_ROLE_ID` が未設定の場合も拒否します。書込み操作は確認待ちとしてD1へ保存され、Discordの確認ボタン押下後に実行されます。確認トークンの有効期限は5分です。
 
 30分前・5分前通知は、WorkersのCron Trigger（毎分）から `/api/tournaments/notifications` を巡回して発火します。Cron経路は `DISCORD_CRON_SECRET` で保護します。ローカルでは開発サーバー起動後に `npm run notifications:check` を実行して同じ確認経路を手動確認できます。定時巡回は通知だけを行い、大会状態の正本は引き続きD1です。
 

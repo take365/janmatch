@@ -2,11 +2,11 @@ import { env } from "cloudflare:workers";
 import { GET as getState, PUT as putState } from "../api/tournaments/state/route";
 import { POST as postEntry } from "../api/tournaments/entries/route";
 import { POST as postTournament } from "../api/tournaments/route";
-import { beginOperation, finishOperation } from "./operation-audit";
+import { beginOperation, finishOperation, requestConfirmation } from "./operation-audit";
 import { getConfig } from "./discord-auth";
 
 export type JanmatchActor = { discordUserId: string; guildId?: string; channelId?: string; interactionId?: string; roles?: string[] };
-export type OperationArgs = { tournamentId?: string; round?: number; tableIndex?: number; expectedVersion?: number; joined?: boolean; roomId?: string; scores?: number[]; deadline?: number; name?: string; gameType?: string; startAt?: string; rounds?: number; pairingMode?: string; uma?: number[]; password?: string; notice?: string };
+export type OperationArgs = { tournamentId?: string; round?: number; tableIndex?: number; expectedVersion?: number; joined?: boolean; roomId?: string; scores?: number[]; deadline?: number; name?: string; gameType?: string; startAt?: string; rounds?: number; pairingMode?: string; uma?: number[]; password?: string; notice?: string; confirmed?: boolean };
 
 const jsonRequest = (url: string, method: string, actor: JanmatchActor, body?: unknown) => {
   const values = env as unknown as Record<string, unknown>; const secret = typeof values.DISCORD_INTERNAL_SECRET === "string" ? values.DISCORD_INTERNAL_SECRET : "";
@@ -16,15 +16,21 @@ const jsonRequest = (url: string, method: string, actor: JanmatchActor, body?: u
 const readState = async (actor: JanmatchActor, tournamentId: string) => getState(new Request(`http://internal/api/tournaments/state?tournamentId=${encodeURIComponent(tournamentId)}`, { headers: { "x-janmatch-internal-secret": String((env as unknown as Record<string, unknown>).DISCORD_INTERNAL_SECRET ?? ""), "x-janmatch-discord-user-id": actor.discordUserId } }));
 const readJson = async (response: Response) => await response.json() as Record<string, unknown>;
 
-export async function executeJanmatchOperation(actor: JanmatchActor, operation: string, args: OperationArgs) {
+export async function executeJanmatchOperation(actor: JanmatchActor, operation: string, args: OperationArgs, existingAuditId?: string) {
   if (!env.DB) throw new Error("D1 binding is unavailable");
-  const audit = await beginOperation({ interactionId: actor.interactionId, actorUserId: actor.discordUserId, actorDiscordUserId: actor.discordUserId, guildId: actor.guildId, channelId: actor.channelId }, operation);
+  const audit = existingAuditId ? { id: existingAuditId, status: "received", afterSummary: "", errorMessage: "", duplicate: false } : await beginOperation({ interactionId: actor.interactionId, actorUserId: actor.discordUserId, actorDiscordUserId: actor.discordUserId, guildId: actor.guildId, channelId: actor.channelId, roles: actor.roles }, operation, "", JSON.stringify(args));
   const auditId = audit.id;
   if (audit.duplicate) return { ok: audit.status === "completed", data: audit.afterSummary || audit.errorMessage };
   try {
     const operatorOnly = new Set(["create_tournament", "start", "confirm", "schedule_round", "cancel_schedule"]);
     const operatorRoleId = getConfig().operatorRoleId;
-    if (operatorOnly.has(operation) && operatorRoleId && !actor.roles?.includes(operatorRoleId)) throw new Error("運営ロールが必要な操作です");
+    if (operatorOnly.has(operation) && (!operatorRoleId || !actor.roles?.includes(operatorRoleId))) throw new Error("運営ロールが未設定、または付与されていないため操作できません");
+    const writeOperation = new Set(["join_round", "cancel_round", "create_tournament", "start", "confirm", "set_room_id", "set_scores", "approve_result", "schedule_round", "cancel_schedule"]);
+    if (writeOperation.has(operation) && !args.confirmed) {
+      const token = crypto.randomUUID();
+      await requestConfirmation(auditId, token, new Date(Date.now() + 5 * 60_000).toISOString());
+      return { ok: true, requiresConfirmation: true, message: `この操作を実行するには確認が必要です。[[JANMATCH_CONFIRM:${token}]]` };
+    }
     let response: Response;
     if (operation === "list_tournaments") {
       const result = await env.DB.prepare("SELECT id, name, start_at as startAt, phase, rounds FROM tournaments ORDER BY start_at ASC LIMIT 20").all();
@@ -54,4 +60,12 @@ export async function executeJanmatchOperation(actor: JanmatchActor, operation: 
   } catch (error) {
     const message = error instanceof Error ? error.message : "操作に失敗しました"; await finishOperation(auditId, "failed", "", message); throw new Error(message);
   }
+}
+
+export async function executePendingJanmatchOperation(actor: JanmatchActor, token: string) {
+  const row = await env.DB.prepare("SELECT id, actor_discord_user_id as actorDiscordUserId, guild_id as guildId, channel_id as channelId, operation_type as operationType, arguments_json as argumentsJson, actor_roles_json as actorRolesJson, confirmation_expires_at as expiresAt, status FROM operation_requests WHERE confirmation_token = ?").bind(token).first<{ id: string; actorDiscordUserId: string; guildId: string; channelId: string; operationType: string; argumentsJson: string; actorRolesJson: string; expiresAt: string; status: string }>();
+  if (!row || row.status !== "pending_confirmation" || row.actorDiscordUserId !== actor.discordUserId || (row.expiresAt && Date.parse(row.expiresAt) < Date.now())) throw new Error("確認操作が無効、または期限切れです");
+  const args = JSON.parse(row.argumentsJson || "{}") as OperationArgs;
+  const result = await executeJanmatchOperation({ ...actor, guildId: row.guildId, channelId: row.channelId, roles: JSON.parse(row.actorRolesJson || "[]") as string[] }, row.operationType, { ...args, confirmed: true }, row.id);
+  return result;
 }
