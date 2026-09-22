@@ -69,7 +69,7 @@ export async function executePendingJanmatchOperation(actor: JanmatchActor, toke
   const operatorRoleId = getConfig().operatorRoleId;
   if (operatorOnly.has(row.operationType) && (!operatorRoleId || !actor.roles?.includes(operatorRoleId))) throw new Error("確認時点で運営ロールが必要です");
   const args = JSON.parse(row.argumentsJson || "{}") as OperationArgs;
-  const claim = await env.DB.prepare("UPDATE operation_requests SET status = 'executing' WHERE id = ? AND actor_discord_user_id = ? AND status = 'pending_confirmation' AND (confirmation_expires_at IS NULL OR confirmation_expires_at > CURRENT_TIMESTAMP)").bind(row.id, actor.discordUserId).run();
+  const claim = await env.DB.prepare("UPDATE operation_requests SET status = 'executing' WHERE id = ? AND actor_discord_user_id = ? AND status = 'pending_confirmation' AND (confirmation_expires_at IS NULL OR julianday(confirmation_expires_at) > julianday('now'))").bind(row.id, actor.discordUserId).run();
   if (!claim.meta.changes) throw new Error("この確認操作はすでに実行中、または完了しています");
   const result = await executeJanmatchOperation({ ...actor, guildId: row.guildId, channelId: row.channelId, roles: actor.roles }, row.operationType, { ...args, confirmed: true }, row.id);
   return result;
