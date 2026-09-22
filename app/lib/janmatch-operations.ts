@@ -8,6 +8,14 @@ import { getConfig } from "./discord-auth";
 export type JanmatchActor = { discordUserId: string; guildId?: string; channelId?: string; interactionId?: string; roles?: string[] };
 export type OperationArgs = { tournamentId?: string; round?: number; tableIndex?: number; expectedVersion?: number; joined?: boolean; roomId?: string; scores?: number[]; deadline?: number; name?: string; gameType?: string; startAt?: string; rounds?: number; pairingMode?: string; uma?: number[]; password?: string; notice?: string; confirmed?: boolean };
 
+async function notifyOperator(actor: JanmatchActor, operation: string, args: OperationArgs) {
+  const config = getConfig();
+  if (!config.operatorChannelId || !config.botToken) return;
+  const detail = args.notice?.trim() || JSON.stringify({ tournamentId: args.tournamentId, round: args.round, roomId: args.roomId, scores: args.scores });
+  const response = await fetch(`https://discord.com/api/v10/channels/${config.operatorChannelId}/messages`, { method: "POST", headers: { authorization: `Bot ${config.botToken}`, "content-type": "application/json" }, body: JSON.stringify({ content: `【JanMatch申告】<@${actor.discordUserId}> / ${operation}\n${detail}` }) });
+  if (!response.ok) throw new Error(`運営チャンネルへの転送に失敗しました（${response.status}）`);
+}
+
 const jsonRequest = (url: string, method: string, actor: JanmatchActor, body?: unknown) => {
   const values = env as unknown as Record<string, unknown>; const secret = typeof values.DISCORD_INTERNAL_SECRET === "string" ? values.DISCORD_INTERNAL_SECRET : "";
   return new Request(url, { method, headers: { "content-type": "application/json", "x-janmatch-internal-secret": secret, "x-janmatch-discord-user-id": actor.discordUserId }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
@@ -30,6 +38,12 @@ export async function executeJanmatchOperation(actor: JanmatchActor, operation: 
       const token = crypto.randomUUID();
       await requestConfirmation(auditId, token, new Date(Date.now() + 5 * 60_000).toISOString());
       return { ok: true, requiresConfirmation: true, message: `この操作を実行するには確認が必要です。[[JANMATCH_CONFIRM:${token}]]` };
+    }
+    if (operation === "contact_operator" || operation === "report_edit") {
+      if (!args.notice?.trim()) throw new Error("問い合わせ内容が必要です");
+      await notifyOperator(actor, operation, args);
+      await finishOperation(auditId, "completed", JSON.stringify({ operation, notified: Boolean(getConfig().operatorChannelId) }));
+      return { ok: true, data: { message: getConfig().operatorChannelId ? "運営へ申告を転送しました。" : "申告を監査ログへ記録しました。運営通知先は未設定です。" } };
     }
     let response: Response;
     if (operation === "list_tournaments") {

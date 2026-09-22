@@ -1,26 +1,73 @@
 import { env } from "cloudflare:workers";
 import { getConfig } from "../../../lib/discord-auth";
-import { deferred, ephemeral, followUpInteraction, interactionAllowed, interactionUser, verifyDiscordSignature, type DiscordInteraction } from "../../../lib/discord-interactions";
+import { deferred, ephemeral, followUpInteraction, interactionAllowed, interactionUser, modal, verifyDiscordSignature, type DiscordInteraction } from "../../../lib/discord-interactions";
 import { runJanmatchAgent } from "../../../lib/janmatch-agent";
 import { executePendingJanmatchOperation } from "../../../lib/janmatch-operations";
 import { getRequestExecutionContext } from "vinext/shims/request-context";
 
 const option = (interaction: DiscordInteraction, name: string) => interaction.data?.options?.find((item) => item.name === name)?.value;
+const field = (interaction: DiscordInteraction, name: string) => interaction.data?.components?.flatMap((row) => row.components ?? []).find((item) => item.custom_id === name)?.value?.trim() ?? "";
+
+const button = (custom_id: string, label: string, style = 2) => ({ type: 2, style, label, custom_id });
+const row = (...components: unknown[]) => ({ type: 1, components });
+const participantMenu = [
+  row(button("janmatch:modal:join", "回戦に参加登録", 3), button("janmatch:modal:cancel", "参加を取り消す", 2)),
+  row(button("janmatch:modal:room", "ルームIDを申告", 2), button("janmatch:modal:scores", "結果を申告", 3)),
+  row(button("janmatch:modal:edit", "編集を申告", 2), button("janmatch:modal:contact", "運営へ問い合わせ", 1)),
+  row(button("janmatch:modal:state", "大会・回戦を照会", 2)),
+];
+const input = (custom_id: string, label: string, required = true, style = 1) => ({ type: 1, components: [{ type: 4, custom_id, label, style, required, max_length: style === 2 ? 2000 : 200 }] });
+const operationModal = (customId: string, title: string, components: unknown[]) => modal(customId, title, components);
+
+function modalFor(customId: string) {
+  if (customId === "janmatch:modal:join" || customId === "janmatch:modal:cancel") return operationModal(`janmatch:form:${customId.endsWith("join") ? "join" : "cancel"}`, customId.endsWith("join") ? "回戦に参加登録" : "参加を取り消す", [input("tournamentId", "大会ID"), input("round", "回戦番号")]);
+  if (customId === "janmatch:modal:room") return operationModal("janmatch:form:room", "ルームIDを申告", [input("tournamentId", "大会ID"), input("round", "回戦番号"), input("tableIndex", "卓番号（1から）"), input("roomId", "ルームID")]);
+  if (customId === "janmatch:modal:scores") return operationModal("janmatch:form:scores", "結果を申告", [input("tournamentId", "大会ID"), input("round", "回戦番号"), input("tableIndex", "卓番号（1から）"), input("scores", "生点4人分（例: 25000,25000,25000,25000）")]);
+  if (customId === "janmatch:modal:edit") return operationModal("janmatch:form:edit", "結果の編集を申告", [input("tournamentId", "大会ID"), input("round", "回戦番号"), input("notice", "編集内容", true, 2)]);
+  if (customId === "janmatch:modal:state") return operationModal("janmatch:form:state", "大会・回戦を照会", [input("tournamentId", "大会ID")]);
+  return operationModal("janmatch:form:contact", "運営へ問い合わせ", [input("tournamentId", "大会ID", false), input("notice", "問い合わせ内容", true, 2)]);
+}
+
+function runAgentInteraction(interaction: DiscordInteraction, actor: { discordUserId: string; guildId?: string; channelId?: string; interactionId?: string; roles?: string[] }, prompt: string, components?: unknown[]) {
+  const task = runJanmatchAgent(actor, prompt).then((content) => {
+    const marker = content.match(/\[\[JANMATCH_CONFIRM:([^\]]+)\]\]/);
+    const clean = content.replace(/\s*\[\[JANMATCH_CONFIRM:[^\]]+\]\]/, "");
+    const confirmation = marker ? [row(button(`janmatch:confirm:${marker[1]}`, "この操作を実行", 3))] : undefined;
+    return followUpInteraction(interaction, clean, components ?? confirmation);
+  }).catch((error) => followUpInteraction(interaction, error instanceof Error ? `処理に失敗しました: ${error.message}` : "処理に失敗しました"));
+  getRequestExecutionContext()?.waitUntil(task);
+  return deferred();
+}
 
 async function handle(interaction: DiscordInteraction) {
   const user = interactionUser(interaction); if (!user) return ephemeral("Discordユーザーを確認できませんでした。");
   const allowed = interactionAllowed(interaction); if (!allowed.ok) return ephemeral(allowed.reason);
   if (interaction.type === 2 && interaction.data?.name === "janmatch") {
     const prompt = typeof option(interaction, "content") === "string" ? String(option(interaction, "content")) : "大会の状態を教えてください";
-    const task = runJanmatchAgent({ discordUserId: user.id, guildId: interaction.guild_id, channelId: interaction.channel_id, interactionId: interaction.id, roles: interaction.member?.roles }, prompt).then((content) => {
-      const marker = content.match(/\[\[JANMATCH_CONFIRM:([^\]]+)\]\]/);
-      const clean = content.replace(/\s*\[\[JANMATCH_CONFIRM:[^\]]+\]\]/, "");
-      const components = marker ? [{ type: 1, components: [{ type: 2, style: 3, label: "この操作を実行", custom_id: `janmatch:confirm:${marker[1]}` }] }] : undefined;
-      return followUpInteraction(interaction, clean, components);
-    }).catch((error) => followUpInteraction(interaction, error instanceof Error ? `処理に失敗しました: ${error.message}` : "処理に失敗しました"));
-    getRequestExecutionContext()?.waitUntil(task);
-    void task;
-    return deferred();
+    const actor = { discordUserId: user.id, guildId: interaction.guild_id, channelId: interaction.channel_id, interactionId: interaction.id, roles: interaction.member?.roles };
+    if (/^(参加|操作|利用)?メニュー(?:を表示|表示)?$/u.test(prompt.trim())) return runAgentInteraction(interaction, actor, prompt, participantMenu);
+    return runAgentInteraction(interaction, actor, prompt);
+  }
+  if (interaction.type === 3 && interaction.data?.custom_id === "janmatch:menu") return ephemeral("参加者向け操作を選択してください。", participantMenu);
+  if (interaction.type === 3 && interaction.data?.custom_id?.startsWith("janmatch:modal:")) {
+    return modalFor(interaction.data.custom_id);
+  }
+  if (interaction.type === 5 && interaction.data?.custom_id?.startsWith("janmatch:form:")) {
+    const form = interaction.data.custom_id.slice("janmatch:form:".length);
+    const tournamentId = field(interaction, "tournamentId");
+    const round = Number(field(interaction, "round"));
+    if ((form !== "contact" && !tournamentId) || (["join", "cancel", "room", "scores", "edit"].includes(form) && !Number.isInteger(round))) return ephemeral("大会IDと回戦番号を正しく入力してください。");
+    const actor = { discordUserId: user.id, guildId: interaction.guild_id, channelId: interaction.channel_id, interactionId: interaction.id, roles: interaction.member?.roles };
+    const prompts: Record<string, string> = {
+      join: `大会ID「${tournamentId}」の第${round}回戦に参加登録して`,
+      cancel: `大会ID「${tournamentId}」の第${round}回戦の参加登録を取り消して`,
+      room: `大会ID「${tournamentId}」の第${round}回戦、卓${Math.max(0, Number(field(interaction, "tableIndex")) - 1)}（内部番号）のルームIDを「${field(interaction, "roomId")}」に登録して`,
+      scores: `大会ID「${tournamentId}」の第${round}回戦、卓${Math.max(0, Number(field(interaction, "tableIndex")) - 1)}（内部番号）の結果を生点「${field(interaction, "scores")}」で登録して`,
+      edit: `大会ID「${tournamentId}」の第${round}回戦について、次の編集申告を運営へ転送して: ${field(interaction, "notice")}`,
+      state: `大会ID「${tournamentId}」の大会・回戦状態を照会して`,
+      contact: `大会ID「${tournamentId || "（指定なし）"}」について、次の問い合わせを運営へ転送して: ${field(interaction, "notice")}`,
+    };
+    return runAgentInteraction(interaction, actor, prompts[form] ?? "入力内容を処理して", undefined);
   }
   if (interaction.type === 3 && interaction.data?.custom_id?.startsWith("janmatch:confirm:")) {
     const token = interaction.data.custom_id.slice("janmatch:confirm:".length);

@@ -27,7 +27,7 @@ export type DiscordInteraction = {
   id: string; token: string; type: number; guild_id?: string; channel_id?: string;
   member?: { user?: { id: string; username?: string; global_name?: string }; roles?: string[] };
   user?: { id: string; username?: string; global_name?: string };
-  data?: { name?: string; custom_id?: string; options?: Array<{ name: string; value?: unknown }> };
+  data?: { name?: string; custom_id?: string; options?: Array<{ name: string; value?: unknown }>; components?: Array<{ components?: Array<{ custom_id?: string; value?: string }> }> };
 };
 
 export function interactionUser(interaction: DiscordInteraction) { return interaction.member?.user ?? interaction.user ?? null; }
@@ -45,9 +45,10 @@ export function hasOperatorRole(interaction: DiscordInteraction): boolean {
   const roleId = getConfig().operatorRoleId; return Boolean(roleId && interaction.member?.roles?.includes(roleId));
 }
 
-export type DiscordResponse = { type: number; data?: { content?: string; flags?: number; components?: unknown[] } };
-export const ephemeral = (content: string): DiscordResponse => ({ type: 4, data: { content, flags: 64 } });
+export type DiscordResponse = { type: number; data?: { content?: string; flags?: number; components?: unknown[]; custom_id?: string; title?: string } };
+export const ephemeral = (content: string, components?: unknown[]): DiscordResponse => ({ type: 4, data: { content, flags: 64, ...(components ? { components } : {}) } });
 export const deferred = (): DiscordResponse => ({ type: 5, data: { flags: 64 } });
+export const modal = (customId: string, title: string, components: unknown[]): DiscordResponse => ({ type: 9, data: { custom_id: customId, title, components } });
 
 export async function followUpInteraction(interaction: DiscordInteraction, content: string, components?: unknown[]) {
   const config = getConfig(); if (!config.applicationId || !config.botToken) throw new Error("Discord Bot設定が未完了です");
