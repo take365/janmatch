@@ -59,9 +59,12 @@ export async function executeJanmatchOperation(actor: JanmatchActor, operation: 
       if (!args.tournamentId) throw new Error("大会IDが必要です");
       const rounds = await env.DB.prepare("SELECT round FROM tournament_rounds WHERE tournament_id = ? AND status = '受付中' ORDER BY round").bind(args.tournamentId).all<{ round: number }>();
       if (!rounds.results.length) throw new Error("現在受付中の回戦がありません");
-      for (const item of rounds.results) {
-        const response = await postEntry(jsonRequest("http://internal/api/tournaments/entries", "POST", actor, { tournamentId: args.tournamentId, round: item.round, joined: operation === "join_tournament" }));
-        const result = await readJson(response); if (!response.ok) throw new Error(typeof result.error === "string" ? result.error : "大会参加操作に失敗しました");
+      const profile = await env.DB.prepare("SELECT nickname, game_name as gameName FROM users WHERE id = ?").bind(actor.discordUserId).first<{ nickname: string; gameName: string }>();
+      if (!profile) throw new Error("DiscordユーザーがJanMatchに登録されていません");
+      if (operation === "join_tournament") {
+        await env.DB.prepare("INSERT INTO tournament_entries (id, tournament_id, user_id, nickname, game_name, round, joined) SELECT ? || ':' || ? || ':' || round, ?, ?, ?, ?, round, 1 FROM tournament_rounds WHERE tournament_id = ? AND status = '受付中' ON CONFLICT(tournament_id, user_id, round) DO UPDATE SET joined = 1, nickname = excluded.nickname, game_name = excluded.game_name").bind(args.tournamentId, actor.discordUserId, actor.discordUserId, profile.nickname, profile.gameName, args.tournamentId).run();
+      } else {
+        await env.DB.prepare("UPDATE tournament_entries SET joined = 0 WHERE tournament_id = ? AND user_id = ? AND round IN (SELECT round FROM tournament_rounds WHERE tournament_id = ? AND status = '受付中')").bind(args.tournamentId, actor.discordUserId, args.tournamentId).run();
       }
       await finishOperation(auditId, "completed", JSON.stringify({ operation, rounds: rounds.results.map((item) => item.round) }));
       return { ok: true, data: { message: `${rounds.results.length}回戦を対象に大会全体の${operation === "join_tournament" ? "参加申請" : "参加取消"}を行いました。`, rounds: rounds.results.map((item) => item.round) } };
