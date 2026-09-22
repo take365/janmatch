@@ -3,6 +3,7 @@ import { getConfig } from "../../../lib/discord-auth";
 import { deferred, ephemeral, followUpInteraction, interactionAllowed, interactionUser, verifyDiscordSignature, type DiscordInteraction } from "../../../lib/discord-interactions";
 import { runJanmatchAgent } from "../../../lib/janmatch-agent";
 import { finishOperation } from "../../../lib/operation-audit";
+import { getRequestExecutionContext } from "vinext/shims/request-context";
 
 const option = (interaction: DiscordInteraction, name: string) => interaction.data?.options?.find((item) => item.name === name)?.value;
 
@@ -11,7 +12,9 @@ async function handle(interaction: DiscordInteraction) {
   const allowed = interactionAllowed(interaction); if (!allowed.ok) return ephemeral(allowed.reason);
   if (interaction.type === 2 && interaction.data?.name === "janmatch") {
     const prompt = typeof option(interaction, "content") === "string" ? String(option(interaction, "content")) : "大会の状態を教えてください";
-    void runJanmatchAgent({ discordUserId: user.id, guildId: interaction.guild_id, channelId: interaction.channel_id, interactionId: interaction.id, roles: interaction.member?.roles }, prompt).then((content) => followUpInteraction(interaction, content)).catch((error) => followUpInteraction(interaction, error instanceof Error ? `処理に失敗しました: ${error.message}` : "処理に失敗しました"));
+    const task = runJanmatchAgent({ discordUserId: user.id, guildId: interaction.guild_id, channelId: interaction.channel_id, interactionId: interaction.id, roles: interaction.member?.roles }, prompt).then((content) => followUpInteraction(interaction, content)).catch((error) => followUpInteraction(interaction, error instanceof Error ? `処理に失敗しました: ${error.message}` : "処理に失敗しました"));
+    getRequestExecutionContext()?.waitUntil(task);
+    void task;
     return deferred();
   }
   if (interaction.type === 3 && interaction.data?.custom_id?.startsWith("janmatch:confirm:")) {

@@ -1,6 +1,7 @@
 import handler from "vinext/server/app-router-entry";
+import { runWithExecutionContext } from "vinext/shims/request-context";
 export default {
-  fetch: (request: Request, env: unknown, ctx: ExecutionContext) => handler.fetch(request, env, ctx),
+  fetch: (request: Request, env: unknown, ctx: ExecutionContext) => runWithExecutionContext(ctx, () => handler.fetch(request, env, ctx)),
   async scheduled(controller: ScheduledController, env: unknown, ctx: ExecutionContext) {
     const values = env as Record<string, unknown>;
     const secret = typeof values.DISCORD_CRON_SECRET === "string" ? values.DISCORD_CRON_SECRET : "";
