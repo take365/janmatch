@@ -22,6 +22,12 @@ export async function ensureDiscordUser(user: { id: string; username?: string; g
   await env.DB.prepare("INSERT INTO users (id, discord_user_id, discord_username, discord_nickname, nickname, game_name) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET discord_username = excluded.discord_username, discord_nickname = excluded.discord_nickname, updated_at = CURRENT_TIMESTAMP").bind(user.id, user.id, username, discordNickname, nickname, nickname).run();
 }
 
+export async function updateDiscordProfile(userId: string, nickname: string, gameName: string) {
+  if (!env.DB) throw new Error("D1 binding is unavailable");
+  if (!nickname.trim() || !gameName.trim()) throw new Error("ニックネームとゲーム内名を入力してください");
+  await env.DB.prepare("UPDATE users SET nickname = ?, game_name = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").bind(nickname.trim(), gameName.trim(), userId).run();
+}
+
 export function isInternalInteraction(request: Request) {
   const values = env as unknown as Record<string, unknown>;
   const secret = typeof values.DISCORD_INTERNAL_SECRET === "string" ? values.DISCORD_INTERNAL_SECRET : "";

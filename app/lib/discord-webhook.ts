@@ -23,9 +23,10 @@ export async function notifyTournament(request: Request, notice: TournamentNotic
   if (!url) { console.warn(`Discord Webhook未設定: ${notice.id}:${round}:${eventType}`); return false; }
   const eventKey = `${notice.id}:${round}:${eventType}`;
   if (!await claim(env.DB, eventKey, notice.id, round, eventType)) return true;
-  const content = `${message}\n${notice.name} / ${round}回戦\n${appLink(request, notice.id)}`;
+  const resource = await env.DB.prepare("SELECT role_id as roleId FROM tournament_discord_resources WHERE tournament_id = ? AND provision_status = 'published'").bind(notice.id).first<{ roleId: string | null }>();
+  const content = `${resource?.roleId ? `<@&${resource.roleId}> ` : ""}${message}\n${notice.name} / ${round}回戦\n${appLink(request, notice.id)}`;
   try {
-    const response = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ content }) });
+    const response = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ content, allowed_mentions: resource?.roleId ? { roles: [resource.roleId] } : { parse: [] } }) });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     return true;
   } catch (error) {

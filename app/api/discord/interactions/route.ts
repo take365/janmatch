@@ -1,5 +1,5 @@
 import { env } from "cloudflare:workers";
-import { ensureDiscordUser, getConfig } from "../../../lib/discord-auth";
+import { ensureDiscordUser, getConfig, updateDiscordProfile } from "../../../lib/discord-auth";
 import { deferred, ephemeral, followUpInteraction, interactionAllowed, interactionUser, modal, verifyDiscordSignature, type DiscordInteraction } from "../../../lib/discord-interactions";
 import { runJanmatchAgent } from "../../../lib/janmatch-agent";
 import { executePendingJanmatchOperation } from "../../../lib/janmatch-operations";
@@ -15,7 +15,7 @@ const participantMenu = [
   row(button("janmatch:modal:join", "回戦に参加登録", 3), button("janmatch:modal:cancel", "回戦参加を取り消す", 2)),
   row(button("janmatch:modal:room", "ルームIDを申告", 2), button("janmatch:modal:scores", "結果を申告", 3)),
   row(button("janmatch:modal:approve", "結果を承認", 3), button("janmatch:modal:edit", "編集を申告", 2)),
-  row(button("janmatch:modal:contact", "運営へ問い合わせ", 1), button("janmatch:modal:state", "大会・回戦を照会", 2)),
+  row(button("janmatch:modal:contact", "運営へ問い合わせ", 1), button("janmatch:modal:state", "大会・回戦を照会", 2), button("janmatch:modal:profile", "利用者登録", 2)),
 ];
 const operatorMenu = [
   row(button("janmatch:modal:operator-create", "大会作成（会話）", 3), button("janmatch:modal:operator-resources", "大会資源を作成", 2)),
@@ -34,6 +34,7 @@ function modalFor(customId: string) {
   if (customId === "janmatch:modal:approve") return operationModal("janmatch:form:approve", "結果を承認", [input("tournamentId", "大会ID"), input("round", "回戦番号"), input("tableIndex", "卓番号（1から）")]);
   if (customId === "janmatch:modal:edit") return operationModal("janmatch:form:edit", "結果の編集を申告", [input("tournamentId", "大会ID"), input("round", "回戦番号"), input("notice", "編集内容", true, 2)]);
   if (customId === "janmatch:modal:state") return operationModal("janmatch:form:state", "大会・回戦を照会", [input("tournamentId", "大会ID")]);
+  if (customId === "janmatch:modal:profile") return operationModal("janmatch:form:profile", "利用者登録", [input("nickname", "JanMatch表示名"), input("gameName", "ゲーム内名")]);
   if (customId === "janmatch:modal:operator-create") return operationModal("janmatch:form:operator-create", "大会作成（会話）", [input("prompt", "大会の希望内容", true, 2)]);
   if (customId === "janmatch:modal:operator-resources") return operationModal("janmatch:form:operator-resources", "大会Discord資源を作成", [input("tournamentId", "大会ID")]);
   if (["start", "confirm", "schedule", "cancel-schedule"].some((action) => customId === `janmatch:modal:operator-${action}`)) return operationModal(`janmatch:form:operator-${customId.slice("janmatch:modal:operator-".length)}`, "大会回戦を操作", [input("tournamentId", "大会ID"), input("round", "回戦番号"), ...(customId.endsWith("schedule") ? [input("deadline", "締切時刻（ISO日時または秒数）")] : [])]);
@@ -71,6 +72,9 @@ async function handle(interaction: DiscordInteraction) {
     const form = interaction.data.custom_id.slice("janmatch:form:".length);
     const tournamentId = field(interaction, "tournamentId");
     const round = Number(field(interaction, "round"));
+    if (form === "profile") {
+      try { await updateDiscordProfile(user.id, field(interaction, "nickname"), field(interaction, "gameName")); return ephemeral("利用者登録を更新しました。大会参加メニューから続けて申請できます。"); } catch (error) { return ephemeral(error instanceof Error ? error.message : "利用者登録に失敗しました"); }
+    }
     if ((form !== "contact" && !tournamentId) || (["join", "cancel", "room", "scores", "edit", "approve", "operator-start", "operator-confirm", "operator-schedule", "operator-cancel-schedule"].includes(form) && !Number.isInteger(round))) return ephemeral("大会IDと回戦番号を正しく入力してください。");
     const actor = { discordUserId: user.id, guildId: interaction.guild_id, channelId: interaction.channel_id, interactionId: interaction.id, roles: interaction.member?.roles };
     const prompts: Record<string, string> = {
