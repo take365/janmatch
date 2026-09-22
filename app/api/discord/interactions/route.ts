@@ -11,18 +11,21 @@ const field = (interaction: DiscordInteraction, name: string) => interaction.dat
 const button = (custom_id: string, label: string, style = 2) => ({ type: 2, style, label, custom_id });
 const row = (...components: unknown[]) => ({ type: 1, components });
 const participantMenu = [
-  row(button("janmatch:modal:join", "回戦に参加登録", 3), button("janmatch:modal:cancel", "参加を取り消す", 2)),
+  row(button("janmatch:modal:tournament-join", "大会全体に参加申請", 3), button("janmatch:modal:tournament-cancel", "大会参加を取り消す", 2)),
+  row(button("janmatch:modal:join", "回戦に参加登録", 3), button("janmatch:modal:cancel", "回戦参加を取り消す", 2)),
   row(button("janmatch:modal:room", "ルームIDを申告", 2), button("janmatch:modal:scores", "結果を申告", 3)),
-  row(button("janmatch:modal:edit", "編集を申告", 2), button("janmatch:modal:contact", "運営へ問い合わせ", 1)),
-  row(button("janmatch:modal:state", "大会・回戦を照会", 2)),
+  row(button("janmatch:modal:approve", "結果を承認", 3), button("janmatch:modal:edit", "編集を申告", 2)),
+  row(button("janmatch:modal:contact", "運営へ問い合わせ", 1), button("janmatch:modal:state", "大会・回戦を照会", 2)),
 ];
 const input = (custom_id: string, label: string, required = true, style = 1) => ({ type: 1, components: [{ type: 4, custom_id, label, style, required, max_length: style === 2 ? 2000 : 200 }] });
 const operationModal = (customId: string, title: string, components: unknown[]) => modal(customId, title, components);
 
 function modalFor(customId: string) {
+  if (customId === "janmatch:modal:tournament-join" || customId === "janmatch:modal:tournament-cancel") return operationModal(`janmatch:form:${customId.endsWith("join") ? "tournament-join" : "tournament-cancel"}`, customId.endsWith("join") ? "大会全体に参加申請" : "大会参加を取り消す", [input("tournamentId", "大会ID")]);
   if (customId === "janmatch:modal:join" || customId === "janmatch:modal:cancel") return operationModal(`janmatch:form:${customId.endsWith("join") ? "join" : "cancel"}`, customId.endsWith("join") ? "回戦に参加登録" : "参加を取り消す", [input("tournamentId", "大会ID"), input("round", "回戦番号")]);
   if (customId === "janmatch:modal:room") return operationModal("janmatch:form:room", "ルームIDを申告", [input("tournamentId", "大会ID"), input("round", "回戦番号"), input("tableIndex", "卓番号（1から）"), input("roomId", "ルームID")]);
   if (customId === "janmatch:modal:scores") return operationModal("janmatch:form:scores", "結果を申告", [input("tournamentId", "大会ID"), input("round", "回戦番号"), input("tableIndex", "卓番号（1から）"), input("scores", "生点4人分（例: 25000,25000,25000,25000）")]);
+  if (customId === "janmatch:modal:approve") return operationModal("janmatch:form:approve", "結果を承認", [input("tournamentId", "大会ID"), input("round", "回戦番号"), input("tableIndex", "卓番号（1から）")]);
   if (customId === "janmatch:modal:edit") return operationModal("janmatch:form:edit", "結果の編集を申告", [input("tournamentId", "大会ID"), input("round", "回戦番号"), input("notice", "編集内容", true, 2)]);
   if (customId === "janmatch:modal:state") return operationModal("janmatch:form:state", "大会・回戦を照会", [input("tournamentId", "大会ID")]);
   return operationModal("janmatch:form:contact", "運営へ問い合わせ", [input("tournamentId", "大会ID", false), input("notice", "問い合わせ内容", true, 2)]);
@@ -56,13 +59,16 @@ async function handle(interaction: DiscordInteraction) {
     const form = interaction.data.custom_id.slice("janmatch:form:".length);
     const tournamentId = field(interaction, "tournamentId");
     const round = Number(field(interaction, "round"));
-    if ((form !== "contact" && !tournamentId) || (["join", "cancel", "room", "scores", "edit"].includes(form) && !Number.isInteger(round))) return ephemeral("大会IDと回戦番号を正しく入力してください。");
+    if ((form !== "contact" && !tournamentId) || (["join", "cancel", "room", "scores", "edit", "approve"].includes(form) && !Number.isInteger(round))) return ephemeral("大会IDと回戦番号を正しく入力してください。");
     const actor = { discordUserId: user.id, guildId: interaction.guild_id, channelId: interaction.channel_id, interactionId: interaction.id, roles: interaction.member?.roles };
     const prompts: Record<string, string> = {
       join: `大会ID「${tournamentId}」の第${round}回戦に参加登録して`,
       cancel: `大会ID「${tournamentId}」の第${round}回戦の参加登録を取り消して`,
+      "tournament-join": `大会ID「${tournamentId}」に大会全体で参加申請して。受付中の全回戦を対象にし、対象回戦数も結果に表示して`,
+      "tournament-cancel": `大会ID「${tournamentId}」の大会参加を取り消して。受付中の全回戦を対象にし、対象回戦数も結果に表示して`,
       room: `大会ID「${tournamentId}」の第${round}回戦、卓${Math.max(0, Number(field(interaction, "tableIndex")) - 1)}（内部番号）のルームIDを「${field(interaction, "roomId")}」に登録して`,
       scores: `大会ID「${tournamentId}」の第${round}回戦、卓${Math.max(0, Number(field(interaction, "tableIndex")) - 1)}（内部番号）の結果を生点「${field(interaction, "scores")}」で登録して`,
+      approve: `大会ID「${tournamentId}」の第${round}回戦、卓${Math.max(0, Number(field(interaction, "tableIndex")) - 1)}（内部番号）の結果を承認して`,
       edit: `大会ID「${tournamentId}」の第${round}回戦について、次の編集申告を運営へ転送して: ${field(interaction, "notice")}`,
       state: `大会ID「${tournamentId}」の大会・回戦状態を照会して`,
       contact: `大会ID「${tournamentId || "（指定なし）"}」について、次の問い合わせを運営へ転送して: ${field(interaction, "notice")}`,

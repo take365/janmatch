@@ -33,7 +33,7 @@ export async function executeJanmatchOperation(actor: JanmatchActor, operation: 
     const operatorOnly = new Set(["create_tournament", "start", "confirm", "schedule_round", "cancel_schedule"]);
     const operatorRoleId = getConfig().operatorRoleId;
     if (operatorOnly.has(operation) && (!operatorRoleId || !actor.roles?.includes(operatorRoleId))) throw new Error("運営ロールが未設定、または付与されていないため操作できません");
-    const writeOperation = new Set(["join_round", "cancel_round", "create_tournament", "start", "confirm", "set_room_id", "set_scores", "approve_result", "schedule_round", "cancel_schedule"]);
+    const writeOperation = new Set(["join_round", "cancel_round", "join_tournament", "cancel_tournament", "create_tournament", "start", "confirm", "set_room_id", "set_scores", "approve_result", "schedule_round", "cancel_schedule"]);
     if (writeOperation.has(operation) && !args.confirmed) {
       const token = crypto.randomUUID();
       await requestConfirmation(auditId, token, new Date(Date.now() + 5 * 60_000).toISOString());
@@ -55,7 +55,17 @@ export async function executeJanmatchOperation(actor: JanmatchActor, operation: 
       const state = await readJson(await readState(actor, args.tournamentId));
       await finishOperation(auditId, "completed", JSON.stringify({ tournamentId: args.tournamentId })); return { ok: true, data: state };
     }
-    if (operation === "join_round" || operation === "cancel_round") {
+    if (operation === "join_tournament" || operation === "cancel_tournament") {
+      if (!args.tournamentId) throw new Error("大会IDが必要です");
+      const rounds = await env.DB.prepare("SELECT round FROM tournament_rounds WHERE tournament_id = ? AND status = '受付中' ORDER BY round").bind(args.tournamentId).all<{ round: number }>();
+      if (!rounds.results.length) throw new Error("現在受付中の回戦がありません");
+      for (const item of rounds.results) {
+        const response = await postEntry(jsonRequest("http://internal/api/tournaments/entries", "POST", actor, { tournamentId: args.tournamentId, round: item.round, joined: operation === "join_tournament" }));
+        const result = await readJson(response); if (!response.ok) throw new Error(typeof result.error === "string" ? result.error : "大会参加操作に失敗しました");
+      }
+      await finishOperation(auditId, "completed", JSON.stringify({ operation, rounds: rounds.results.map((item) => item.round) }));
+      return { ok: true, data: { message: `${rounds.results.length}回戦を対象に大会全体の${operation === "join_tournament" ? "参加申請" : "参加取消"}を行いました。`, rounds: rounds.results.map((item) => item.round) } };
+    } else if (operation === "join_round" || operation === "cancel_round") {
       if (!args.tournamentId || !Number.isInteger(args.round)) throw new Error("大会IDと回戦が必要です");
       response = await postEntry(jsonRequest("http://internal/api/tournaments/entries", "POST", actor, { tournamentId: args.tournamentId, round: args.round, joined: operation === "join_round" }));
     } else if (operation === "create_tournament") {

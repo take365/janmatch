@@ -7,7 +7,7 @@ import { recentAgentMessages, recordAgentMessage } from "./operation-audit";
 import { getConfig } from "./discord-auth";
 
 const operationSchema = z.object({
-  operation: z.enum(["list_tournaments", "get_tournament_state", "join_round", "cancel_round", "create_tournament", "start", "confirm", "set_room_id", "set_scores", "approve_result", "schedule_round", "cancel_schedule", "contact_operator", "report_edit"]),
+  operation: z.enum(["list_tournaments", "get_tournament_state", "join_round", "cancel_round", "join_tournament", "cancel_tournament", "create_tournament", "start", "confirm", "set_room_id", "set_scores", "approve_result", "schedule_round", "cancel_schedule", "contact_operator", "report_edit"]),
   tournamentId: z.string().optional(), round: z.number().int().optional(), tableIndex: z.number().int().optional(), expectedVersion: z.number().int().optional(), joined: z.boolean().optional(), roomId: z.string().optional(), scores: z.array(z.number().int()).optional(), deadline: z.number().int().optional(), name: z.string().optional(), gameType: z.string().optional(), startAt: z.string().optional(), rounds: z.number().int().optional(), pairingMode: z.string().optional(), uma: z.array(z.number()).optional(), password: z.string().optional(), notice: z.string().optional(),
 });
 
