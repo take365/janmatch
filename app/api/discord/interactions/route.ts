@@ -10,35 +10,41 @@ const field = (interaction: DiscordInteraction, name: string) => interaction.dat
 
 const button = (custom_id: string, label: string, style = 2) => ({ type: 2, style, label, custom_id });
 const row = (...components: unknown[]) => ({ type: 1, components });
-const participantMenu = [
-  row(button("janmatch:modal:tournament-join", "大会全体に参加申請", 3), button("janmatch:modal:tournament-cancel", "大会参加を取り消す", 2)),
-  row(button("janmatch:modal:join", "回戦に参加登録", 3), button("janmatch:modal:cancel", "回戦参加を取り消す", 2)),
-  row(button("janmatch:modal:room", "ルームIDを申告", 2), button("janmatch:modal:scores", "結果を申告", 3)),
-  row(button("janmatch:modal:approve", "結果を承認", 3), button("janmatch:modal:edit", "編集を申告", 2)),
-  row(button("janmatch:modal:contact", "運営へ問い合わせ", 1), button("janmatch:modal:state", "大会・回戦を照会", 2), button("janmatch:modal:profile", "利用者登録", 2)),
-];
+const participantMenu = (tournamentId?: string) => {
+  const suffix = tournamentId ? `:${tournamentId}` : "";
+  return [
+    row(button(`janmatch:modal:tournament-join${suffix}`, "大会全体に参加申請", 3), button(`janmatch:modal:tournament-cancel${suffix}`, "大会参加を取り消す", 2)),
+    row(button(`janmatch:modal:join${suffix}`, "回戦に参加登録", 3), button(`janmatch:modal:cancel${suffix}`, "回戦参加を取り消す", 2)),
+    row(button(`janmatch:modal:room${suffix}`, "ルームIDを申告", 2), button(`janmatch:modal:scores${suffix}`, "結果を申告", 3)),
+    row(button(`janmatch:modal:approve${suffix}`, "結果を承認", 3), button(`janmatch:modal:edit${suffix}`, "編集を申告", 2)),
+    row(button(`janmatch:modal:contact${suffix}`, "運営へ問い合わせ", 1), button(`janmatch:modal:state${suffix}`, "大会・回戦を照会", 2), button(`janmatch:modal:profile`, "利用者登録", 2)),
+  ];
+};
 const operatorMenu = [
   row(button("janmatch:modal:operator-create", "大会作成（会話）", 3), button("janmatch:modal:operator-resources", "大会資源を作成", 2)),
   row(button("janmatch:modal:operator-start", "回戦受付を開始", 3), button("janmatch:modal:operator-confirm", "卓を確定", 3)),
   row(button("janmatch:modal:operator-schedule", "受付を予約", 2), button("janmatch:modal:operator-cancel-schedule", "予約を取消", 2)),
 ];
-const input = (custom_id: string, label: string, required = true, style = 1) => ({ type: 1, components: [{ type: 4, custom_id, label, style, required, max_length: style === 2 ? 2000 : 200 }] });
+const input = (custom_id: string, label: string, required = true, style = 1, value?: string) => ({ type: 1, components: [{ type: 4, custom_id, label, style, required, max_length: style === 2 ? 2000 : 200, ...(value ? { value } : {}) }] });
 const operationModal = (customId: string, title: string, components: unknown[]) => modal(customId, title, components);
 const tableLabel = (value: string) => { const number = Number(value); return Number.isInteger(number) && number > 0 && number <= 26 ? `卓${String.fromCharCode(64 + number)}` : `卓${value}`; };
 
 function modalFor(customId: string) {
-  if (customId === "janmatch:modal:tournament-join" || customId === "janmatch:modal:tournament-cancel") return operationModal(`janmatch:form:${customId.endsWith("join") ? "tournament-join" : "tournament-cancel"}`, customId.endsWith("join") ? "大会全体に参加申請" : "大会参加を取り消す", [input("tournamentId", "大会ID")]);
-  if (customId === "janmatch:modal:join" || customId === "janmatch:modal:cancel") return operationModal(`janmatch:form:${customId.endsWith("join") ? "join" : "cancel"}`, customId.endsWith("join") ? "回戦に参加登録" : "参加を取り消す", [input("tournamentId", "大会ID"), input("round", "回戦番号")]);
-  if (customId === "janmatch:modal:room") return operationModal("janmatch:form:room", "ルームIDを申告", [input("tournamentId", "大会ID"), input("round", "回戦番号"), input("tableIndex", "卓番号（1から）"), input("roomId", "ルームID")]);
-  if (customId === "janmatch:modal:scores") return operationModal("janmatch:form:scores", "結果を申告", [input("tournamentId", "大会ID"), input("round", "回戦番号"), input("tableIndex", "卓番号（1から）"), input("scores", "生点4人分（例: 25000,25000,25000,25000）")]);
-  if (customId === "janmatch:modal:approve") return operationModal("janmatch:form:approve", "結果を承認", [input("tournamentId", "大会ID"), input("round", "回戦番号"), input("tableIndex", "卓番号（1から）")]);
-  if (customId === "janmatch:modal:edit") return operationModal("janmatch:form:edit", "結果の編集を申告", [input("tournamentId", "大会ID"), input("round", "回戦番号"), input("notice", "編集内容", true, 2)]);
-  if (customId === "janmatch:modal:state") return operationModal("janmatch:form:state", "大会・回戦を照会", [input("tournamentId", "大会ID")]);
-  if (customId === "janmatch:modal:profile") return operationModal("janmatch:form:profile", "利用者登録", [input("nickname", "JanMatch表示名"), input("gameName", "ゲーム内名")]);
-  if (customId === "janmatch:modal:operator-create") return operationModal("janmatch:form:operator-create", "大会作成（会話）", [input("prompt", "大会の希望内容", true, 2)]);
-  if (customId === "janmatch:modal:operator-resources") return operationModal("janmatch:form:operator-resources", "大会Discord資源を作成", [input("tournamentId", "大会ID")]);
-  if (["start", "confirm", "schedule", "cancel-schedule"].some((action) => customId === `janmatch:modal:operator-${action}`)) return operationModal(`janmatch:form:operator-${customId.slice("janmatch:modal:operator-".length)}`, "大会回戦を操作", [input("tournamentId", "大会ID"), input("round", "回戦番号"), ...(customId.endsWith("schedule") ? [input("deadline", "締切時刻（ISO日時または秒数）")] : [])]);
-  return operationModal("janmatch:form:contact", "運営へ問い合わせ", [input("tournamentId", "大会ID", false), input("notice", "問い合わせ内容", true, 2)]);
+  const [, , action, ...idParts] = customId.split(":");
+  const tournamentId = idParts.join(":");
+  const tournament = (required = true) => input("tournamentId", "大会ID", required, 1, tournamentId);
+  if (["tournament-join", "tournament-cancel"].includes(action)) return operationModal(`janmatch:form:${action}`, action.endsWith("join") ? "大会全体に参加申請" : "大会参加を取り消す", [tournament()]);
+  if (["join", "cancel"].includes(action)) return operationModal(`janmatch:form:${action}`, action === "join" ? "回戦に参加登録" : "参加を取り消す", [tournament(), input("round", "回戦番号")]);
+  if (action === "room") return operationModal("janmatch:form:room", "ルームIDを申告", [tournament(), input("round", "回戦番号"), input("tableIndex", "卓番号（1から）"), input("roomId", "ルームID")]);
+  if (action === "scores") return operationModal("janmatch:form:scores", "結果を申告", [tournament(), input("round", "回戦番号"), input("tableIndex", "卓番号（1から）"), input("scores", "生点4人分（例: 25000,25000,25000,25000）")]);
+  if (action === "approve") return operationModal("janmatch:form:approve", "結果を承認", [tournament(), input("round", "回戦番号"), input("tableIndex", "卓番号（1から）")]);
+  if (action === "edit") return operationModal("janmatch:form:edit", "結果の編集を申告", [tournament(), input("round", "回戦番号"), input("notice", "編集内容", true, 2)]);
+  if (action === "state") return operationModal("janmatch:form:state", "大会・回戦を照会", [tournament()]);
+  if (action === "profile") return operationModal("janmatch:form:profile", "利用者登録", [input("nickname", "JanMatch表示名"), input("gameName", "ゲーム内名")]);
+  if (action === "operator-create") return operationModal("janmatch:form:operator-create", "大会作成（会話）", [input("prompt", "大会の希望内容", true, 2)]);
+  if (action === "operator-resources") return operationModal("janmatch:form:operator-resources", "大会Discord資源を作成", [tournament()]);
+  if (["start", "confirm", "schedule", "cancel-schedule"].includes(action)) return operationModal(`janmatch:form:operator-${action}`, "大会回戦を操作", [tournament(), input("round", "回戦番号"), ...(action === "schedule" ? [input("deadline", "締切時刻（ISO日時または秒数）")] : [])]);
+  return operationModal("janmatch:form:contact", "運営へ問い合わせ", [tournament(false), input("notice", "問い合わせ内容", true, 2)]);
 }
 
 function runAgentInteraction(interaction: DiscordInteraction, actor: { discordUserId: string; guildId?: string; channelId?: string; interactionId?: string; roles?: string[] }, prompt: string, components?: unknown[]) {
@@ -60,10 +66,10 @@ async function handle(interaction: DiscordInteraction) {
     const prompt = typeof option(interaction, "content") === "string" ? String(option(interaction, "content")) : "大会の状態を教えてください";
     const actor = { discordUserId: user.id, guildId: interaction.guild_id, channelId: interaction.channel_id, interactionId: interaction.id, roles: interaction.member?.roles };
     if (/^運営メニュー(?:を表示|表示)?$/u.test(prompt.trim())) return runAgentInteraction(interaction, actor, prompt, operatorMenu);
-    if (/^(参加|操作|利用)?メニュー(?:を表示|表示)?$/u.test(prompt.trim())) return runAgentInteraction(interaction, actor, prompt, participantMenu);
+    if (/^(参加|操作|利用)?メニュー(?:を表示|表示)?$/u.test(prompt.trim())) return runAgentInteraction(interaction, actor, prompt, participantMenu());
     return runAgentInteraction(interaction, actor, prompt);
   }
-  if (interaction.type === 3 && interaction.data?.custom_id === "janmatch:menu") return ephemeral("参加者向け操作を選択してください。", participantMenu);
+  if (interaction.type === 3 && (interaction.data?.custom_id === "janmatch:menu" || interaction.data?.custom_id?.startsWith("janmatch:menu:"))) return ephemeral("参加者向け操作を選択してください。", participantMenu(interaction.data.custom_id.slice("janmatch:menu:".length) || undefined));
   if (interaction.type === 3 && interaction.data?.custom_id === "janmatch:operator-menu") return ephemeral("運営操作を選択してください。実行時に運営ロールを再確認します。", operatorMenu);
   if (interaction.type === 3 && interaction.data?.custom_id?.startsWith("janmatch:modal:")) {
     return modalFor(interaction.data.custom_id);

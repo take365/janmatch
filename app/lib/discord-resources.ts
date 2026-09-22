@@ -30,7 +30,9 @@ export async function provisionTournamentResources(tournamentId: string) {
   await env.DB.prepare("INSERT OR IGNORE INTO tournament_discord_resources (tournament_id, guild_id, announcement_channel_id, provision_status) VALUES (?, ?, ?, 'draft')").bind(tournamentId, config.guildId, config.announcementChannelId).run();
   let row = await env.DB.prepare("SELECT tournament_id as tournamentId, guild_id as guildId, role_id as roleId, channel_id as channelId, announcement_channel_id as announcementChannelId, announcement_message_id as announcementMessageId, provision_status as provisionStatus, last_error as lastError, cleanup_at as cleanupAt FROM tournament_discord_resources WHERE tournament_id = ?").bind(tournamentId).first<ResourceRow>();
   if (!row) throw new Error("大会Discord資源台帳を作成できませんでした");
-  await save(env.DB, tournamentId, { provisionStatus: "provisioning", lastError: "", retryAt: null });
+  if (row.provisionStatus === "published") return { tournamentId, roleId: row.roleId, channelId: row.channelId, announcementChannelId: row.announcementChannelId ?? config.announcementChannelId, announcementMessageId: row.announcementMessageId, status: "published" };
+  const claim = await env.DB.prepare("UPDATE tournament_discord_resources SET provision_status = 'provisioning', last_error = '', retry_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE tournament_id = ? AND provision_status IN ('draft', 'failed') AND (retry_at IS NULL OR julianday(retry_at) <= julianday('now'))").bind(tournamentId).run();
+  if (!claim.meta.changes) throw new Error("大会Discord資源は別の処理が実行中です");
   try {
     if (!row.roleId) {
       const role = await discordRequest(`/guilds/${config.guildId}/roles`, { method: "POST", body: JSON.stringify({ name: `大会｜${tournament.name}`.slice(0, 100), mentionable: true, permissions: "0" }) });
@@ -40,14 +42,15 @@ export async function provisionTournamentResources(tournamentId: string) {
     }
     if (!row.channelId) {
       const everyone = config.guildId;
-      const overwrites = [{ id: everyone, type: 0, allow: "0", deny: "1024" }, { id: row.roleId, type: 0, allow: "3072", deny: "0" }, { id: config.operatorRoleId, type: 0, allow: "3072", deny: "0" }];
+      const bot = await discordRequest("/users/@me");
+      const overwrites = [{ id: everyone, type: 0, allow: "0", deny: "1024" }, { id: row.roleId, type: 0, allow: "3072", deny: "0" }, { id: config.operatorRoleId, type: 0, allow: "3072", deny: "0" }, ...(bot?.id ? [{ id: String(bot.id), type: 1, allow: "3072", deny: "0" }] : [])];
       const channel = await discordRequest(`/guilds/${config.guildId}/channels`, { method: "POST", body: JSON.stringify({ name: `大会-${tournament.id}`.toLowerCase().replace(/[^a-z0-9-]/g, "-").slice(0, 90), type: 0, permission_overwrites: overwrites }) });
       row = { ...row, channelId: String(channel?.id ?? "") };
       if (!row.channelId) throw new Error("大会チャンネルIDを取得できませんでした");
       await save(env.DB, tournamentId, { channelId: row.channelId });
     }
     if (!row.announcementMessageId) {
-      const message = await discordRequest(`/channels/${row.announcementChannelId ?? config.announcementChannelId}/messages`, { method: "POST", body: JSON.stringify({ content: `【大会参加受付】${tournament.name}\n${tournament.notice || "大会の参加申請はボタンから行ってください。"}\n大会ID: ${tournament.id}`, components: [{ type: 1, components: [{ type: 2, style: 3, label: "参加メニュー", custom_id: "janmatch:menu" }] }], allowed_mentions: { parse: [] } }) });
+      const message = await discordRequest(`/channels/${row.announcementChannelId ?? config.announcementChannelId}/messages`, { method: "POST", body: JSON.stringify({ content: `【大会参加受付】${tournament.name}\n${tournament.notice || "大会の参加申請はボタンから行ってください。"}\n大会ID: ${tournament.id}`, components: [{ type: 1, components: [{ type: 2, style: 3, label: "参加メニュー", custom_id: `janmatch:menu:${tournament.id}` }] }], allowed_mentions: { parse: [] } }) });
       row = { ...row, announcementMessageId: String(message?.id ?? "") };
       if (!row.announcementMessageId) throw new Error("大会告知メッセージIDを取得できませんでした");
       await save(env.DB, tournamentId, { announcementMessageId: row.announcementMessageId });
@@ -76,10 +79,13 @@ export async function runDiscordResourceLifecycle() {
       try { await provisionTournamentResources(tournament.id); provisioned += 1; } catch (error) { console.warn(`Discord資源の事前作成に失敗: ${tournament.id}`, error); }
     }
   }
-  const cleanup = await env.DB.prepare("SELECT tournament_id as tournamentId, role_id as roleId, channel_id as channelId, guild_id as guildId FROM tournament_discord_resources WHERE provision_status = 'published' AND cleanup_at IS NOT NULL AND julianday(cleanup_at) <= julianday('now')").all<{ tournamentId: string; roleId: string | null; channelId: string | null; guildId: string }>();
+  const cleanup = await env.DB.prepare("SELECT r.tournament_id as tournamentId, r.role_id as roleId, r.channel_id as channelId, r.guild_id as guildId FROM tournament_discord_resources r WHERE r.provision_status IN ('published', 'failed') AND r.cleanup_at IS NOT NULL AND julianday(r.cleanup_at) <= julianday('now')").all<{ tournamentId: string; roleId: string | null; channelId: string | null; guildId: string }>();
   let cleaned = 0;
   for (const resource of cleanup.results) {
     try {
+      const rounds = await env.DB.prepare("SELECT round, state_json as stateJson FROM tournament_rounds WHERE tournament_id = ?").bind(resource.tournamentId).all<{ round: number; stateJson: string }>();
+      const ended = rounds.results.length > 0 && rounds.results.every((item) => { try { const state = JSON.parse(item.stateJson) as { tables?: Array<{ resultStatus?: string }> }; return Array.isArray(state.tables) && state.tables.length > 0 && state.tables.every((table) => table.resultStatus === "結果確定"); } catch { return false; } });
+      if (!ended) continue;
       if (resource.channelId) await discordRequest(`/channels/${resource.channelId}`, { method: "DELETE" });
       if (resource.roleId) await discordRequest(`/guilds/${resource.guildId}/roles/${resource.roleId}`, { method: "DELETE" });
       await env.DB.prepare("UPDATE tournament_discord_resources SET provision_status = 'cleaned', updated_at = CURRENT_TIMESTAMP WHERE tournament_id = ?").bind(resource.tournamentId).run();
@@ -93,14 +99,15 @@ export async function runDiscordResourceLifecycle() {
 
 export async function syncTournamentRole(tournamentId: string, userId: string, joined: boolean) {
   if (!env.DB) throw new Error("D1 binding is unavailable");
-  const desiredState = joined ? "joined" : "removed";
+  const otherJoined = await env.DB.prepare("SELECT 1 FROM tournament_entries WHERE tournament_id = ? AND user_id = ? AND joined = 1 LIMIT 1").bind(tournamentId, userId).first();
+  const desiredState = joined || Boolean(otherJoined) ? "joined" : "removed";
   await env.DB.prepare("INSERT INTO tournament_role_sync (tournament_id, user_id, desired_state, status, last_error, retry_at, updated_at) VALUES (?, ?, ?, 'pending', '', NULL, CURRENT_TIMESTAMP) ON CONFLICT(tournament_id, user_id) DO UPDATE SET desired_state = excluded.desired_state, status = 'pending', last_error = '', retry_at = NULL, updated_at = CURRENT_TIMESTAMP").bind(tournamentId, userId, desiredState).run();
   try {
     const config = getConfig();
     const resource = await env.DB.prepare("SELECT role_id as roleId FROM tournament_discord_resources WHERE tournament_id = ? AND provision_status = 'published'").bind(tournamentId).first<{ roleId: string | null }>();
     if (!config.guildId || !resource?.roleId) throw new Error("大会ロールが未作成です");
     const path = `/guilds/${config.guildId}/members/${userId}/roles/${resource.roleId}`;
-    await discordRequest(path, { method: joined ? "PUT" : "DELETE", body: joined ? undefined : undefined });
+    await discordRequest(path, { method: desiredState === "joined" ? "PUT" : "DELETE" });
     await env.DB.prepare("UPDATE tournament_role_sync SET status = 'synced', last_error = '', retry_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE tournament_id = ? AND user_id = ?").bind(tournamentId, userId).run();
     return { status: "synced" as const };
   } catch (error) {
