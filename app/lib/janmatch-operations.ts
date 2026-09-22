@@ -1,0 +1,57 @@
+import { env } from "cloudflare:workers";
+import { GET as getState, PUT as putState } from "../api/tournaments/state/route";
+import { POST as postEntry } from "../api/tournaments/entries/route";
+import { POST as postTournament } from "../api/tournaments/route";
+import { beginOperation, finishOperation } from "./operation-audit";
+import { getConfig } from "./discord-auth";
+
+export type JanmatchActor = { discordUserId: string; guildId?: string; channelId?: string; interactionId?: string; roles?: string[] };
+export type OperationArgs = { tournamentId?: string; round?: number; tableIndex?: number; expectedVersion?: number; joined?: boolean; roomId?: string; scores?: number[]; deadline?: number; name?: string; gameType?: string; startAt?: string; rounds?: number; pairingMode?: string; uma?: number[]; password?: string; notice?: string };
+
+const jsonRequest = (url: string, method: string, actor: JanmatchActor, body?: unknown) => {
+  const values = env as unknown as Record<string, unknown>; const secret = typeof values.DISCORD_INTERNAL_SECRET === "string" ? values.DISCORD_INTERNAL_SECRET : "";
+  return new Request(url, { method, headers: { "content-type": "application/json", "x-janmatch-internal-secret": secret, "x-janmatch-discord-user-id": actor.discordUserId }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+};
+
+const readState = async (actor: JanmatchActor, tournamentId: string) => getState(new Request(`http://internal/api/tournaments/state?tournamentId=${encodeURIComponent(tournamentId)}`, { headers: { "x-janmatch-internal-secret": String((env as unknown as Record<string, unknown>).DISCORD_INTERNAL_SECRET ?? ""), "x-janmatch-discord-user-id": actor.discordUserId } }));
+const readJson = async (response: Response) => await response.json() as Record<string, unknown>;
+
+export async function executeJanmatchOperation(actor: JanmatchActor, operation: string, args: OperationArgs) {
+  if (!env.DB) throw new Error("D1 binding is unavailable");
+  const audit = await beginOperation({ interactionId: actor.interactionId, actorUserId: actor.discordUserId, actorDiscordUserId: actor.discordUserId, guildId: actor.guildId, channelId: actor.channelId }, operation);
+  const auditId = audit.id;
+  if (audit.duplicate) return { ok: audit.status === "completed", data: audit.afterSummary || audit.errorMessage };
+  try {
+    const operatorOnly = new Set(["create_tournament", "start", "confirm", "schedule_round", "cancel_schedule"]);
+    const operatorRoleId = getConfig().operatorRoleId;
+    if (operatorOnly.has(operation) && operatorRoleId && !actor.roles?.includes(operatorRoleId)) throw new Error("運営ロールが必要な操作です");
+    let response: Response;
+    if (operation === "list_tournaments") {
+      const result = await env.DB.prepare("SELECT id, name, start_at as startAt, phase, rounds FROM tournaments ORDER BY start_at ASC LIMIT 20").all();
+      await finishOperation(auditId, "completed", JSON.stringify({ count: result.results.length })); return { ok: true, data: result.results };
+    }
+    if (operation === "get_tournament_state") {
+      if (!args.tournamentId) throw new Error("大会IDが必要です");
+      const state = await readJson(await readState(actor, args.tournamentId));
+      await finishOperation(auditId, "completed", JSON.stringify({ tournamentId: args.tournamentId })); return { ok: true, data: state };
+    }
+    if (operation === "join_round" || operation === "cancel_round") {
+      if (!args.tournamentId || !Number.isInteger(args.round)) throw new Error("大会IDと回戦が必要です");
+      response = await postEntry(jsonRequest("http://internal/api/tournaments/entries", "POST", actor, { tournamentId: args.tournamentId, round: args.round, joined: operation === "join_round" }));
+    } else if (operation === "create_tournament") {
+      if (!args.name || !args.gameType || !args.startAt || !args.rounds || !args.pairingMode || !Array.isArray(args.uma)) throw new Error("大会名、種別、開始時刻、回戦数、組み合わせ、ウマが必要です");
+      response = await postTournament(jsonRequest("http://internal/api/tournaments", "POST", actor, { name: args.name, gameType: args.gameType, startAt: args.startAt, rounds: args.rounds, pairingMode: args.pairingMode, uma: args.uma, password: args.password ?? "", notice: args.notice ?? "" }));
+    } else {
+      if (!args.tournamentId || !Number.isInteger(args.round)) throw new Error("大会IDと回戦が必要です");
+      const stateResponse = await readState(actor, args.tournamentId); const states = await stateResponse.json() as Array<{ round: number; version: number }>;
+      const current = states.find((item) => item.round === args.round); if (!current) throw new Error("回戦状態が見つかりません");
+      const body: Record<string, unknown> = { tournamentId: args.tournamentId, round: args.round, expectedVersion: args.expectedVersion ?? current.version, action: operation === "set_room_id" ? "room" : operation === "set_scores" ? "scores" : operation === "approve_result" ? "approve" : operation === "schedule_round" ? "schedule" : operation === "cancel_schedule" ? "cancel_schedule" : operation };
+      if (args.tableIndex !== undefined) body.tableIndex = args.tableIndex; if (args.roomId !== undefined) body.roomId = args.roomId; if (args.scores !== undefined) body.scores = args.scores; if (args.deadline !== undefined) body.deadline = args.deadline;
+      response = await putState(jsonRequest("http://internal/api/tournaments/state", "PUT", actor, body));
+    }
+    const result = await readJson(response); if (!response.ok) throw new Error(typeof result.error === "string" ? result.error : "JanMatch操作に失敗しました");
+    await finishOperation(auditId, "completed", JSON.stringify({ operation })); return { ok: true, data: result };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "操作に失敗しました"; await finishOperation(auditId, "failed", "", message); throw new Error(message);
+  }
+}

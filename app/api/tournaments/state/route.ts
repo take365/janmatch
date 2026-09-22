@@ -1,5 +1,6 @@
 import { env } from "cloudflare:workers";
 import { getProfile, hasTournamentAccess } from "../../../lib/session";
+import { isInternalInteraction } from "../../../lib/discord-auth";
 import { getTournamentNotice, notifyTournament } from "../../../lib/discord-webhook";
 
 type Table = { label: string; members: string[]; memberIds?: string[]; representative: string; representativeUserId?: string; roomId?: string; scores?: number[]; approvals?: string[]; resultStatus?: string };
@@ -68,7 +69,7 @@ export async function GET(request: Request) {
   if (!tournament) return Response.json({ error: "大会が見つかりません" }, { status: 404 });
   const profile = await getProfile(request);
   const isOrganizer = Boolean(profile && profile.sessionId === tournament.ownerUserId);
-  if (tournament.password && !isOrganizer && !hasTournamentAccess(request, tournamentId)) return Response.json({ error: "大会のパスワードが必要です" }, { status: 403 });
+  if (tournament.password && !isOrganizer && !isInternalInteraction(request) && !hasTournamentAccess(request, tournamentId)) return Response.json({ error: "大会のパスワードが必要です" }, { status: 403 });
   const result = await env.DB.prepare("SELECT round, status, state_json as stateJson, version FROM tournament_rounds WHERE tournament_id = ? ORDER BY round").bind(tournamentId).all();
   const rounds = [];
   for (const row of result.results as Array<{ round: number; status: string; stateJson: string; version: number }>) {
@@ -94,7 +95,7 @@ export async function PUT(request: Request) {
   if (current.version !== expectedVersion) return Response.json({ error: "他の操作で状態が更新されています", current: { round, status: current.status, ...parseState(current.stateJson), version: current.version } }, { status: 409 });
 
   const isOrganizer = profile.sessionId === tournament.ownerUserId;
-  if (!isOrganizer && tournament.password && !hasTournamentAccess(request, tournamentId)) return Response.json({ error: "大会のパスワードが必要です" }, { status: 403 });
+  if (!isOrganizer && tournament.password && !isInternalInteraction(request) && !hasTournamentAccess(request, tournamentId)) return Response.json({ error: "大会のパスワードが必要です" }, { status: 403 });
   const state = parseState(current.stateJson);
   let status = current.status;
   let nextState = state;

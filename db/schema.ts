@@ -36,7 +36,7 @@ export const apiTokens = sqliteTable("api_tokens", {
 });
 
 export const tournaments = sqliteTable("tournaments", {
-  id: text("id").primaryKey(), owner: text("owner").notNull(), ownerUserId: text("owner_user_id"), name: text("name").notNull(), gameType: text("game_type").notNull(), startAt: text("start_at").notNull(), password: text("password").notNull(), rounds: integer("rounds").notNull(), pairingMode: text("pairing_mode").notNull(), uma: text("uma").notNull(), notice: text("notice").notNull().default(""), phase: text("phase").notNull().default("before"), createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  id: text("id").primaryKey(), owner: text("owner").notNull(), ownerUserId: text("owner_user_id"), name: text("name").notNull(), gameType: text("game_type").notNull(), startAt: text("start_at").notNull(), password: text("password").notNull(), rounds: integer("rounds").notNull(), pairingMode: text("pairing_mode").notNull(), uma: text("uma").notNull(), notice: text("notice").notNull().default(""), phase: text("phase").notNull().default("before"), discordChannelId: text("discord_channel_id"), createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
 export const tournamentEntries = sqliteTable("tournament_entries", { id: text("id").primaryKey(), tournamentId: text("tournament_id").notNull(), userId: text("user_id"), nickname: text("nickname").notNull(), gameName: text("game_name").notNull().default(""), round: integer("round").notNull(), joined: integer("joined", { mode: "boolean" }).notNull().default(true), createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`) });
 export const tournamentRounds = sqliteTable("tournament_rounds", {
@@ -60,4 +60,12 @@ export const profiles = sqliteTable("profiles", {
   nickname: text("nickname").notNull(),
   gameName: text("game_name").notNull().default(""),
   updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const operationRequests = sqliteTable("operation_requests", {
+  id: text("id").primaryKey(), interactionId: text("interaction_id"), actorUserId: text("actor_user_id"), actorDiscordUserId: text("actor_discord_user_id").notNull(), guildId: text("guild_id"), channelId: text("channel_id"), operationType: text("operation_type").notNull(), status: text("status").notNull(), reason: text("reason").notNull().default(""), beforeSummary: text("before_summary").notNull().default(""), afterSummary: text("after_summary").notNull().default(""), errorMessage: text("error_message").notNull().default(""), confirmationToken: text("confirmation_token"), confirmationExpiresAt: text("confirmation_expires_at"), createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`), completedAt: text("completed_at"),
+});
+
+export const agentMessages = sqliteTable("agent_messages", {
+  id: text("id").primaryKey(), tournamentId: text("tournament_id"), channelId: text("channel_id").notNull(), discordUserId: text("discord_user_id").notNull(), role: text("role").notNull(), content: text("content").notNull(), interactionId: text("interaction_id"), createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });

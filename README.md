@@ -36,11 +36,19 @@ DISCORD_GUILD_ID=対象DiscordサーバーのGuild ID
 APP_ORIGIN=http://localhost:3000
 DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
 DISCORD_CRON_SECRET=ローカル確認用のランダムな秘密値
+DISCORD_APPLICATION_ID=Discord Application ID（通常はDISCORD_CLIENT_IDと同じ）
+DISCORD_PUBLIC_KEY=Discord Developer Portalの公開キー
+DISCORD_BOT_TOKEN=Botトークン
+DISCORD_INTERNAL_SECRET=Discord InteractionからJanMatch専用ツールへ渡す内部共有シークレット
+DISCORD_OPERATOR_ROLE_ID=運営ロールのID
+DISCORD_ALLOWED_CHANNEL_IDS=利用を許可するChannel IDをカンマ区切り
 ```
 
 `npm run db:local:migrate` 実行後、`/login` からDiscordログインを開始できます。対象Guildのメンバーであることを確認し、セッション値はハッシュ化してD1へ保存します。
 
 大会進行通知を使う場合は、Discordの対象チャンネルでIncoming Webhookを作成し、`DISCORD_WEBHOOK_URL` を `.dev.vars` または本番のシークレットへ設定します。Webhook URLはD1・画面・リポジトリ・通常ログには保存・表示しません。通知送信に失敗しても大会状態の更新は成功し、サーバーログで失敗を確認できます。送信済みイベントはD1で大会・回戦・通知種別ごとに一意管理します。
+
+Discord操作基盤を使う場合は、同じApplicationのSpidey Botを再利用し、Botトークン・公開キー・Guild ID・許可チャンネル・運営ロールを設定します。Guildコマンドは `npm run discord:register` で開発Guildへ登録します。Interactionは署名検証後にJanMatch専用ツールを実行し、操作要求と結果をD1へ監査記録します。
 
 30分前・5分前通知は、WorkersのCron Trigger（毎分）から `/api/tournaments/notifications` を巡回して発火します。Cron経路は `DISCORD_CRON_SECRET` で保護します。ローカルでは開発サーバー起動後に `npm run notifications:check` を実行して同じ確認経路を手動確認できます。定時巡回は通知だけを行い、大会状態の正本は引き続きD1です。
 

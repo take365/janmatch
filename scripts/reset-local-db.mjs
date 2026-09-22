@@ -6,10 +6,10 @@ const root = resolve(import.meta.dirname, "..");
 const localState = resolve(root, ".wrangler", "state", "v3", "d1");
 const ownerDiscordId = process.env.JANMATCH_SEED_DISCORD_USER_ID || "seed-owner-discord-id";
 const users = [
-  ["seed-owner-user", ownerDiscordId, "きたろう", "きたろう"],
-  ["seed-player-2", "seed-player-discord-2", "テスト参加者2", "雀魂ユーザー2"],
-  ["seed-player-3", "seed-player-discord-3", "テスト参加者3", "雀魂ユーザー3"],
-  ["seed-player-4", "seed-player-discord-4", "テスト参加者4", "雀魂ユーザー4"],
+  [ownerDiscordId, ownerDiscordId, "きたろう", "きたろう"],
+  ["seed-player-discord-2", "seed-player-discord-2", "テスト参加者2", "雀魂ユーザー2"],
+  ["seed-player-discord-3", "seed-player-discord-3", "テスト参加者3", "雀魂ユーザー3"],
+  ["seed-player-discord-4", "seed-player-discord-4", "テスト参加者4", "雀魂ユーザー4"],
 ];
 const tournamentId = "sample-discord-tournament";
 const quote = (value) => `'${String(value).replaceAll("'", "''")}'`;
