@@ -14,6 +14,14 @@ async function discordRequest(path: string, init: RequestInit = {}) {
   return response.status === 204 ? null : await response.json() as Record<string, unknown>;
 }
 
+async function deleteDiscordResource(path: string) {
+  try { await discordRequest(path, { method: "DELETE" }); }
+  catch (error) {
+    if (error instanceof Error && /HTTP 404\b/.test(error.message)) return;
+    throw error;
+  }
+}
+
 async function save(db: D1Database, tournamentId: string, patch: Partial<{ roleId: string | null; channelId: string | null; announcementChannelId: string | null; announcementMessageId: string | null; provisionStatus: string; lastError: string; retryAt: string | null }>) {
   const entries = Object.entries(patch);
   if (!entries.length) return;
@@ -89,17 +97,26 @@ export async function runDiscordResourceLifecycle() {
       try { await provisionTournamentResources(tournament.id); provisioned += 1; } catch (error) { console.warn(`Discord資源の事前作成に失敗: ${tournament.id}`, error); }
     }
   }
-  const cleanup = await env.DB.prepare("SELECT r.tournament_id as tournamentId, r.role_id as roleId, r.channel_id as channelId, r.guild_id as guildId FROM tournament_discord_resources r WHERE r.provision_status IN ('published', 'failed') AND r.cleanup_at IS NOT NULL AND julianday(r.cleanup_at) <= julianday('now')").all<{ tournamentId: string; roleId: string | null; channelId: string | null; guildId: string }>();
+  const cleanup = await env.DB.prepare("SELECT r.tournament_id as tournamentId, r.role_id as roleId, r.channel_id as channelId, r.guild_id as guildId FROM tournament_discord_resources r WHERE r.provision_status IN ('published', 'failed') AND r.cleanup_at IS NOT NULL AND julianday(r.cleanup_at) <= julianday('now') AND (r.retry_at IS NULL OR julianday(r.retry_at) <= julianday('now'))").all<{ tournamentId: string; roleId: string | null; channelId: string | null; guildId: string }>();
   let cleaned = 0;
   for (const resource of cleanup.results) {
     try {
       const rounds = await env.DB.prepare("SELECT round, state_json as stateJson FROM tournament_rounds WHERE tournament_id = ?").bind(resource.tournamentId).all<{ round: number; stateJson: string }>();
       const ended = rounds.results.length > 0 && rounds.results.every((item) => { try { const state = JSON.parse(item.stateJson) as { tables?: Array<{ resultStatus?: string }> }; return Array.isArray(state.tables) && state.tables.length > 0 && state.tables.every((table) => table.resultStatus === "結果確定"); } catch { return false; } });
       if (!ended) continue;
-      if (resource.channelId) await discordRequest(`/channels/${resource.channelId}`, { method: "DELETE" });
-      if (resource.roleId) await discordRequest(`/guilds/${resource.guildId}/roles/${resource.roleId}`, { method: "DELETE" });
-      await env.DB.prepare("UPDATE tournament_discord_resources SET provision_status = 'cleaned', updated_at = CURRENT_TIMESTAMP WHERE tournament_id = ?").bind(resource.tournamentId).run();
-      cleaned += 1;
+      const errors: string[] = [];
+      if (resource.channelId) {
+        try { await deleteDiscordResource(`/channels/${resource.channelId}`); await env.DB.prepare("UPDATE tournament_discord_resources SET channel_id = NULL, updated_at = CURRENT_TIMESTAMP WHERE tournament_id = ?").bind(resource.tournamentId).run(); } catch (error) { errors.push(error instanceof Error ? error.message : "チャンネル削除に失敗しました"); }
+      }
+      if (resource.roleId) {
+        try { await deleteDiscordResource(`/guilds/${resource.guildId}/roles/${resource.roleId}`); await env.DB.prepare("UPDATE tournament_discord_resources SET role_id = NULL, updated_at = CURRENT_TIMESTAMP WHERE tournament_id = ?").bind(resource.tournamentId).run(); } catch (error) { errors.push(error instanceof Error ? error.message : "ロール削除に失敗しました"); }
+      }
+      if (errors.length) {
+        await env.DB.prepare("UPDATE tournament_discord_resources SET provision_status = 'failed', last_error = ?, retry_at = ?, updated_at = CURRENT_TIMESTAMP WHERE tournament_id = ?").bind(errors.join(" / "), new Date(Date.now() + 60_000).toISOString(), resource.tournamentId).run();
+      } else {
+        await env.DB.prepare("UPDATE tournament_discord_resources SET provision_status = 'cleaned', last_error = '', retry_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE tournament_id = ?").bind(resource.tournamentId).run();
+        cleaned += 1;
+      }
     } catch (error) {
       await env.DB.prepare("UPDATE tournament_discord_resources SET provision_status = 'failed', last_error = ?, retry_at = ?, updated_at = CURRENT_TIMESTAMP WHERE tournament_id = ?").bind(error instanceof Error ? error.message : "Discord資源の削除に失敗しました", new Date(Date.now() + 60_000).toISOString(), resource.tournamentId).run();
     }
