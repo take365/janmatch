@@ -73,7 +73,7 @@ export async function executeJanmatchOperation(actor: JanmatchActor, operation: 
       const profile = await env.DB.prepare("SELECT nickname, game_name as gameName FROM users WHERE id = ?").bind(actor.discordUserId).first<{ nickname: string; gameName: string }>();
       if (!profile) throw new Error("DiscordユーザーがJanMatchに登録されていません");
       if (operation === "join_tournament") {
-        await env.DB.prepare("INSERT INTO tournament_entries (id, tournament_id, user_id, nickname, game_name, round, joined) SELECT ? || ':' || ? || ':' || round, ?, ?, ?, ?, round, 1 FROM tournament_rounds WHERE tournament_id = ? AND status = '受付中' ON CONFLICT(tournament_id, user_id, round) DO UPDATE SET joined = 1, nickname = excluded.nickname, game_name = excluded.game_name").bind(args.tournamentId, actor.discordUserId, actor.discordUserId, profile.nickname, profile.gameName, args.tournamentId).run();
+        await env.DB.prepare("INSERT INTO tournament_entries (id, tournament_id, user_id, nickname, game_name, round, joined) SELECT ? || ':' || ? || ':' || round, ?, ?, ?, ?, round, 1 FROM tournament_rounds WHERE tournament_id = ? AND status = '受付中' ON CONFLICT(tournament_id, user_id, round) DO UPDATE SET joined = 1, nickname = excluded.nickname, game_name = excluded.game_name").bind(args.tournamentId, actor.discordUserId, args.tournamentId, actor.discordUserId, profile.nickname, profile.gameName, args.tournamentId).run();
       } else {
         await env.DB.prepare("UPDATE tournament_entries SET joined = 0 WHERE tournament_id = ? AND user_id = ? AND round IN (SELECT round FROM tournament_rounds WHERE tournament_id = ? AND status = '受付中')").bind(args.tournamentId, actor.discordUserId, args.tournamentId).run();
       }
