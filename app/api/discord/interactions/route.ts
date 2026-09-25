@@ -81,7 +81,8 @@ async function handle(interaction: DiscordInteraction) {
     if (form === "profile") {
       try { await updateDiscordProfile(user.id, field(interaction, "nickname"), field(interaction, "gameName")); return ephemeral("利用者登録を更新しました。大会参加メニューから続けて申請できます。"); } catch (error) { return ephemeral(error instanceof Error ? error.message : "利用者登録に失敗しました"); }
     }
-    if ((form !== "contact" && !tournamentId) || (["join", "cancel", "room", "scores", "edit", "approve", "operator-start", "operator-confirm", "operator-schedule", "operator-cancel-schedule"].includes(form) && !Number.isInteger(round))) return ephemeral("大会IDと回戦番号を正しく入力してください。");
+    const requiresTournamentId = !["contact", "operator-create"].includes(form);
+    if ((requiresTournamentId && !tournamentId) || (["join", "cancel", "room", "scores", "edit", "approve", "operator-start", "operator-confirm", "operator-schedule", "operator-cancel-schedule"].includes(form) && !Number.isInteger(round))) return ephemeral("大会IDと回戦番号を正しく入力してください。");
     const actor = { discordUserId: user.id, guildId: interaction.guild_id, channelId: interaction.channel_id, interactionId: interaction.id, roles: interaction.member?.roles };
     const prompts: Record<string, string> = {
       join: `大会ID「${tournamentId}」の第${round}回戦に参加登録して`,
